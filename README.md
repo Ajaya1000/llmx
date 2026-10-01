@@ -41,6 +41,10 @@ The agent harness should
 
 ## Executor
 
-```
-```
 
+# TODO
+- [ ] Current Session history across executor
+- [ ] Wiki Across sessions
+- [ ] Skill Proposer
+- [ ] Workflow support
+- [ ] Workflow as another node
