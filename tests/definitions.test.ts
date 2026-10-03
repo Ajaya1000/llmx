@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { MissionAgent } from '../src/agent/agent.js';
 import type { AgentDefinition } from '../src/agent/agents.js';
 import { loadAgents } from '../src/agent/agents.js';
 import { EnvironmentImpl } from '../src/mission/environment.js';
-import { MissionAgent } from '../src/agent/agent.js';
 
 function bareDef(
   overrides: Partial<AgentDefinition> & { id: string },

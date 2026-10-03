@@ -1,7 +1,7 @@
 import {
+  type AgentSession,
   createAgentSession,
   SessionManager,
-  type AgentSession,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 

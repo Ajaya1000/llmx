@@ -1,8 +1,8 @@
 import {
   ProcessTerminal,
   Text,
-  TuiMainScreen,
   type TUI,
+  TuiMainScreen,
 } from '@earendil-works/pi-tui';
 import type { MissionUi } from '../types.js';
 

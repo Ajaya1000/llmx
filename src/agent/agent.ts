@@ -1,11 +1,11 @@
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type {
   AgentSession,
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import { AgentMessage } from '@earendil-works/pi-agent-core';
 import { AgentSessionRepository } from '../repository/agent-session.js';
+import type { ToolProvider } from '../tools/toolProvider.js';
 import type { AgentRunResult, MissionUi } from '../types.js';
-import { ToolProvider } from '../tools/toolProvider.js';
 import type { AgentDefinition } from './agents.js';
 
 export interface AgentOptions {

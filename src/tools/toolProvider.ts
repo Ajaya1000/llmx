@@ -1,9 +1,9 @@
-import { AgentToolResult } from '@earendil-works/pi-agent-core';
-import { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { Type, type Static } from 'typebox';
-import { TaskExecutor } from '../agent/agent.js';
-import { type AgentDefinition } from '../agent/agents.js';
-import { type TaskExecutorFactory } from '../factory/taskExecutorFactory.js';
+import type { AgentToolResult } from '@earendil-works/pi-agent-core';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { type Static, Type } from 'typebox';
+import type { TaskExecutor } from '../agent/agent.js';
+import type { AgentDefinition } from '../agent/agents.js';
+import type { TaskExecutorFactory } from '../factory/taskExecutorFactory.js';
 
 /** Information of the parent agent */
 export interface ToolProviderContext {

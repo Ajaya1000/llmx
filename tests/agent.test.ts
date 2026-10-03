@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { MissionAgent } from '../src/agent/agent.js';
 import { CommitLog } from '../src/mission/commit-log.js';
 import { EnvironmentImpl } from '../src/mission/environment.js';
 import { InMemoryWikiMaintainer } from '../src/mission/wiki.js';
-import { MissionAgent } from '../src/agent/agent.js';
 
 describe('CommitLog', () => {
   it('commits and reads working slates in order', () => {

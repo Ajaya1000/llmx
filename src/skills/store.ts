@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Skill } from './schema.js';
 import { SkillParseError } from './parse.js';
 import { compilePredicate, compilePreState } from './predicates.js';
+import type { Skill } from './schema.js';
 
 export interface ValidationIssue {
   skillId: string;

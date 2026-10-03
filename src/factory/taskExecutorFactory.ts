@@ -1,7 +1,7 @@
 import { TaskExecutor } from '../agent/agent.js';
-import { type AgentDefinition } from '../agent/agents.js';
-import { AgentSessionRepository } from '../repository/agent-session.js';
-import { ToolProvider } from '../tools/toolProvider.js';
+import type { AgentDefinition } from '../agent/agents.js';
+import type { AgentSessionRepository } from '../repository/agent-session.js';
+import type { ToolProvider } from '../tools/toolProvider.js';
 import type { MissionUi } from '../types.js';
 
 export interface TaskExecutorCreateContext {

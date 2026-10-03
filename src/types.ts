@@ -1,9 +1,9 @@
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type {
   AgentSession,
   AgentSessionEvent,
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import type { AgentMessage } from '@earendil-works/pi-agent-core';
 
 export type { AgentSession, AgentSessionEvent, ToolDefinition };
 
