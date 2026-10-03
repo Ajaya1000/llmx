@@ -2,8 +2,6 @@ export * from './types.js';
 export * from './repository/agent-session.js';
 export * from './agent/agent.js';
 export * from './agent/agents.js';
-export * from './mission/environment.js';
-export * from './mission/commit-log.js';
 export * from './mission/manager.js';
 export * from './mission/wiki.js';
 export * from './mission/tui.js';

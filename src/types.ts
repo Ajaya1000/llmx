@@ -22,14 +22,6 @@ export interface Mission {
   properties?: Record<string, string>;
 }
 
-/** A working state commit — an agent's slate at a point in time. In-memory only; never persisted across sessions. Can be consumed by the WikiMaintainer. */
-export interface WorkingSlate {
-  agentId: string;
-  committedAt: number;
-  content: Record<string, unknown>;
-  note?: string;
-}
-
 export type WikiEntryKind = 'failure' | 'lesson';
 
 export interface WikiEntry {
@@ -42,33 +34,10 @@ export interface WikiEntry {
 
 /** Distilled experience for agents. Consumes working slates and failures; hands lessons back. */
 export interface WikiMaintainer {
-  /** Ingest a working slate (e.g. after teardown) so it can be distilled later. */
-  recordSlate(slate: WorkingSlate): void;
   /** Record a failure or lesson produced by an agent. */
   recordEntry(agentId: string, kind: WikiEntryKind, content: string): WikiEntry;
   /** The current lesson store — seeds every agent's context. */
   lessons(): WikiEntry[];
-}
-
-/** In-memory working-state commit store, shared across the agents of one mission. */
-export interface CommitStore {
-  commit(
-    agentId: string,
-    content: Record<string, unknown>,
-    note?: string
-  ): WorkingSlate;
-  all(): WorkingSlate[];
-  byAgent(agentId: string): WorkingSlate[];
-}
-
-/** The environment a MissionManager provides and passes down to every agent. */
-export interface Environment {
-  id: string;
-  properties: Record<string, string>;
-  /** Working-state commits from every agent in the mission (not persisted across sessions). */
-  commits: CommitStore;
-  /** A human-readable description of the environment — enters every agent's seed prompt. */
-  describe(): string;
 }
 
 /** One agent's own run result — its final text is what the parent's spawn tool call receives. */

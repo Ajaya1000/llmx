@@ -2,19 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type {
   WikiEntry,
   WikiEntryKind,
-  WikiMaintainer,
-  WorkingSlate,
+  WikiMaintainer
 } from '../types.js';
 
 /** Minimal WikiMaintainer: lessons recorded in memory; slates ingested for later distillation. */
 export class InMemoryWikiMaintainer implements WikiMaintainer {
   private entries: WikiEntry[] = [];
-  private slates: WorkingSlate[] = [];
-
-  recordSlate(slate: WorkingSlate): void {
-    this.slates.push(slate);
-  }
-
   recordEntry(
     agentId: string,
     kind: WikiEntryKind,
@@ -38,10 +31,5 @@ export class InMemoryWikiMaintainer implements WikiMaintainer {
   /** Every recorded entry — consumed by the SkillProposer's distillation input. */
   allEntries(): WikiEntry[] {
     return [...this.entries];
-  }
-
-  /** Every ingested slate. */
-  allSlates(): WorkingSlate[] {
-    return [...this.slates];
   }
 }
