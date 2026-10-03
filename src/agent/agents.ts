@@ -27,7 +27,7 @@ export interface AgentDefinition {
 export class AgentParseError extends Error {
   constructor(
     message: string,
-    readonly filePath: string
+    readonly filePath: string,
   ) {
     super(message);
   }
@@ -60,7 +60,7 @@ const agentFileSchema = z.object({
         forwardDescription: z.string().default(''),
         backwardDescription: z.string().default(''),
         condition: z.string().min(1),
-      })
+      }),
     )
     .default([]),
   metadata: z
@@ -73,7 +73,7 @@ const agentFileSchema = z.object({
 
 /** One agent per directory: `<agentsDir>/<domain>/<slug>/agent.md`, id = directory slug. */
 export async function loadAgents(
-  agentsDir: string
+  agentsDir: string,
 ): Promise<AgentDefinition[]> {
   const agents: AgentDefinition[] = [];
   for (const domain of await fs.readdir(agentsDir, { withFileTypes: true })) {
@@ -86,7 +86,7 @@ export async function loadAgents(
         agentsDir,
         domain.name,
         agentDir.name,
-        'agent.md'
+        'agent.md',
       );
       agents.push(await loadAgentFile(filePath, domain.name, agentDir.name));
     }
@@ -94,7 +94,7 @@ export async function loadAgents(
   if (agents.length === 0) {
     throw new AgentParseError(
       `No agent definitions found in ${agentsDir}`,
-      agentsDir
+      agentsDir,
     );
   }
   return agents;
@@ -103,14 +103,14 @@ export async function loadAgents(
 export async function loadAgentFile(
   filePath: string,
   domainName?: string,
-  slugName?: string
+  slugName?: string,
 ): Promise<AgentDefinition> {
   const text = await fs.readFile(filePath, 'utf8');
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
   if (!match) {
     throw new AgentParseError(
       "Missing YAML front matter: file must start with a '---' fenced block",
-      filePath
+      filePath,
     );
   }
 
@@ -120,7 +120,7 @@ export async function loadAgentFile(
   } catch (err) {
     throw new AgentParseError(
       `Invalid YAML front matter: ${err instanceof Error ? err.message : String(err)}`,
-      filePath
+      filePath,
     );
   }
   if (frontMatter === null || typeof frontMatter !== 'object') {
@@ -134,7 +134,7 @@ export async function loadAgentFile(
   if (error) {
     throw new AgentParseError(
       `Agent validation failed: ${JSON.stringify(error.issues, null, 2)}`,
-      filePath
+      filePath,
     );
   }
 
@@ -142,7 +142,7 @@ export async function loadAgentFile(
   if (data.id !== slug) {
     throw new AgentParseError(
       `id "${data.id}" must match the directory slug "${slug}"`,
-      filePath
+      filePath,
     );
   }
   const domain =

@@ -5,8 +5,8 @@ import type {
 import { AgentMessage } from '@earendil-works/pi-agent-core';
 import { AgentSessionRepository } from '../repository/agent-session.js';
 import type { AgentRunResult, MissionUi } from '../types.js';
-import type { AgentDefinition } from './agents.js';
 import { ToolProvider } from '../tools/toolProvider.js';
+import type { AgentDefinition } from './agents.js';
 
 export interface AgentOptions {
   /** Stable identifier, assigned by the MissionManager (e.g. "agent-1"). */
@@ -21,7 +21,7 @@ export interface AgentOptions {
   depth: number;
   cwd?: string;
   repository?: AgentSessionRepository;
-  toolProvider?: ToolProvider
+  toolProvider?: ToolProvider;
 }
 
 export class TaskExecutor {
@@ -32,7 +32,7 @@ export class TaskExecutor {
   private readonly cwd?: string;
   private readonly repository: AgentSessionRepository;
   private readonly ui: MissionUi;
-  private readonly toolProvider?: ToolProvider
+  private readonly toolProvider?: ToolProvider;
 
   private session?: AgentSession;
 
@@ -44,7 +44,7 @@ export class TaskExecutor {
     this.cwd = options.cwd;
     this.repository = options.repository ?? new AgentSessionRepository();
     this.ui = options.ui;
-    this.toolProvider = options.toolProvider
+    this.toolProvider = options.toolProvider;
   }
 
   /** The agent's transcript — pi owns it; valid until dispose(). */
@@ -67,11 +67,10 @@ export class TaskExecutor {
     });
 
     this.ui.agentStarted(this.agentId, this.task);
-    const unsubscribe = this.ui
-      ? this.session.subscribe((event) =>
-          this.ui.agentEvent(this.agentId, event)
-        )
-      : undefined;
+    const unsubscribe = this.session.subscribe((event) =>
+      this.ui.agentEvent(this.agentId, event),
+    );
+
     try {
       await this.session.prompt(this.composeSeed());
     } finally {
@@ -108,7 +107,7 @@ export class TaskExecutor {
         `Post-state: ${JSON.stringify(def.postState)}`,
         '',
         '## Procedure',
-        def.body
+        def.body,
       );
     }
 
@@ -120,22 +119,22 @@ export class TaskExecutor {
       'Notes:',
       '- Delegate by calling spawn_agent; pass the agent id (if definitions allow) and only the context the child needs.',
       '- Commit your working state with commit_state before handing control back or delegating.',
-      '- Your final assistant message is what your parent (or the user) receives — make it a self-contained summary.'
+      '- Your final assistant message is what your parent (or the user) receives — make it a self-contained summary.',
     );
     return parts.join('\n');
   }
 
   private tools(): Array<ToolDefinition> | undefined {
     return this.toolProvider?.tools({
-        agent: this.definition,
-        depth: this.depth
-      });
+      agent: this.definition,
+      depth: this.depth,
+    });
   }
 
   private assertSession(): void {
     if (!this.session) {
       throw new Error(
-        `Agent ${this.agentId} has not run yet: call run() first`
+        `Agent ${this.agentId} has not run yet: call run() first`,
       );
     }
   }

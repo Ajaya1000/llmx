@@ -17,14 +17,16 @@ export class LogMissionUi implements MissionUi {
 
   agentEvent(
     agentId: string,
-    event: { type: string; toolName?: string; delta?: string }
+    event: { type: string; toolName?: string; delta?: string },
   ): void {
     switch (event.type) {
       case 'tool_execution_start':
         console.log(`[mission] · ${agentId} → ${event.toolName ?? 'tool'} …`);
         break;
       case 'tool_execution_end':
-        console.log(`[mission] · ${agentId} → ${event.toolName ?? 'tool'} done`);
+        console.log(
+          `[mission] · ${agentId} → ${event.toolName ?? 'tool'} done`,
+        );
         break;
       default:
         break;

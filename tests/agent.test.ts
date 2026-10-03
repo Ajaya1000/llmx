@@ -15,7 +15,7 @@ describe('CommitLog', () => {
     expect(b.note).toBe('final');
     expect(log.byAgent('agent-2')).toHaveLength(1);
     expect(new Set(log.all().map((s) => s.committedAt > 0))).toEqual(
-      new Set([true])
+      new Set([true]),
     );
   });
 });
@@ -65,7 +65,7 @@ describe('MissionAgent tools', () => {
         spawnAgentTool(): {
           execute: (
             id: string,
-            params: { task: string }
+            params: { task: string },
           ) => Promise<{ content: { text: string }[] }>;
         };
       }
@@ -92,7 +92,7 @@ describe('MissionAgent tools', () => {
         commitStateTool(): {
           execute: (
             id: string,
-            params: { content: Record<string, unknown> }
+            params: { content: Record<string, unknown> },
           ) => Promise<unknown>;
         };
       }

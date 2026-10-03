@@ -107,14 +107,14 @@ class Parser {
 
   constructor(
     private readonly tokens: Token[],
-    private readonly source: string
+    private readonly source: string,
   ) {}
 
   parse(): astNode {
     const node = this.parseOr();
     if (this.pos < this.tokens.length) {
       throw new Error(
-        `Unexpected trailing tokens in predicate: '${this.source}'`
+        `Unexpected trailing tokens in predicate: '${this.source}'`,
       );
     }
     return node;
@@ -288,7 +288,7 @@ export function compilePredicate(source: string): PredicateFn {
  * Entry values may be literals (exact equality) or predicate strings.
  */
 export function compilePreState(
-  required: Record<string, unknown> | undefined
+  required: Record<string, unknown> | undefined,
 ): PredicateFn {
   const checks: PredicateFn[] = [];
   for (const [key, expected] of Object.entries(required ?? {})) {

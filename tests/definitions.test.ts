@@ -5,7 +5,7 @@ import { EnvironmentImpl } from '../src/mission/environment.js';
 import { MissionAgent } from '../src/agent/agent.js';
 
 function bareDef(
-  overrides: Partial<AgentDefinition> & { id: string }
+  overrides: Partial<AgentDefinition> & { id: string },
 ): AgentDefinition {
   return {
     title: overrides.id,
@@ -24,7 +24,7 @@ function bareDef(
 function spawnToolOf(agent: MissionAgent): {
   execute: (
     id: string,
-    params: { agent?: string; task: string }
+    params: { agent?: string; task: string },
   ) => Promise<{ content: { text: string }[] }>;
 } {
   const tool = (
@@ -32,7 +32,7 @@ function spawnToolOf(agent: MissionAgent): {
       spawnAgentTool(): {
         execute: (
           i: string,
-          p: unknown
+          p: unknown,
         ) => Promise<{ content: { text: string }[] }>;
       };
     }

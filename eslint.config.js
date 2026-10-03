@@ -19,5 +19,5 @@ export default tseslint.config(
       ],
       'import/order': ['warn', { 'newlines-between': 'never' }],
     },
-  }
+  },
 );

@@ -15,7 +15,7 @@ export class SkillValidationError extends Error {
     super(
       `Skill validation failed:\n${issues
         .map((i) => `- [${i.skillId}] ${i.message}`)
-        .join('\n')}`
+        .join('\n')}`,
     );
   }
 }
@@ -28,7 +28,7 @@ const MAX_PARSABLE = 1024;
  */
 export function validateSkill(
   skill: Skill,
-  filePath?: string
+  filePath?: string,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const add = (message: string) =>
@@ -45,7 +45,7 @@ export function validateSkill(
       compilePredicate(edge.condition);
     } catch (err) {
       add(
-        `edge '${edge.id}': invalid condition — ${err instanceof Error ? err.message : String(err)}`
+        `edge '${edge.id}': invalid condition — ${err instanceof Error ? err.message : String(err)}`,
       );
     }
     if (edge.id === edge.target) {
@@ -87,7 +87,7 @@ export async function loadSkillGraph(root = 'skills'): Promise<{
   } catch {
     throw new SkillParseError(
       `Skill root directory not found or unreadable: ${root}`,
-      root
+      root,
     );
   }
 

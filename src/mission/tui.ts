@@ -39,7 +39,7 @@ export class TuiMissionUi implements MissionUi {
 
   agentEvent(
     agentId: string,
-    event: { type: string; toolName?: string; delta?: string }
+    event: { type: string; toolName?: string; delta?: string },
   ): void {
     switch (event.type) {
       case 'tool_execution_start':

@@ -7,7 +7,7 @@ import type { Skill } from './schema.js';
 export class SkillParseError extends Error {
   constructor(
     message: string,
-    readonly filePath: string
+    readonly filePath: string,
   ) {
     super(message);
   }
@@ -46,7 +46,7 @@ const frontMatterSchema = z.object({
         forwardDescription: z.string().default(''),
         backwardDescription: z.string().default(''),
         condition: z.string().min(1),
-      })
+      }),
     )
     .default([]),
   metadata: z
@@ -73,13 +73,13 @@ export async function parseSkillFile(filePath: string): Promise<RawSkillFile> {
 
 export function parseSkillText(
   text: string,
-  filePath = '<inline>'
+  filePath = '<inline>',
 ): RawSkillFile {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
   if (!match) {
     throw new SkillParseError(
       "Missing YAML front matter: file must start with a '---' fenced block",
-      filePath
+      filePath,
     );
   }
   const [, head, body] = match;
@@ -89,7 +89,7 @@ export function parseSkillText(
   } catch (err) {
     throw new SkillParseError(
       `Invalid YAML front matter: ${err instanceof Error ? err.message : String(err)}`,
-      filePath
+      filePath,
     );
   }
   if (frontMatter === null || typeof frontMatter !== 'object') {
@@ -110,7 +110,7 @@ export async function loadSkillFile(filePath: string): Promise<Skill> {
   if (error) {
     throw new SkillParseError(
       `Skill validation failed: ${JSON.stringify(error.issues, null, 2)}`,
-      filePath
+      filePath,
     );
   }
   const relative = path.relative('', filePath);

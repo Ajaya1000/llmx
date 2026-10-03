@@ -1,9 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  WikiEntry,
-  WikiEntryKind,
-  WikiMaintainer
-} from '../types.js';
+import type { WikiEntry, WikiEntryKind, WikiMaintainer } from '../types.js';
 
 /** Minimal WikiMaintainer: lessons recorded in memory; slates ingested for later distillation. */
 export class InMemoryWikiMaintainer implements WikiMaintainer {
@@ -11,7 +7,7 @@ export class InMemoryWikiMaintainer implements WikiMaintainer {
   recordEntry(
     agentId: string,
     kind: WikiEntryKind,
-    content: string
+    content: string,
   ): WikiEntry {
     const entry: WikiEntry = {
       id: randomUUID(),
