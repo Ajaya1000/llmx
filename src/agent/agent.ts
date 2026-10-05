@@ -1,12 +1,9 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
-import type {
-  AgentSession,
-  ToolDefinition,
-} from '@earendil-works/pi-coding-agent';
-import { AgentSessionRepository } from '../repository/agent-session.js';
-import type { ToolProvider } from '../tools/toolProvider.js';
-import type { AgentRunResult, MissionUi } from '../types.js';
-import type { AgentDefinition } from './agents.js';
+import type { DurableAgentSession } from '../durable/durable-session.ts';
+import { AgentSessionRepository } from '../durable/index.ts';
+import type { SpawnHandler } from '../durable/spawn-tool.ts';
+import type { AgentRunResult, MissionUi } from '../types.ts';
+import type { AgentDefinition } from './agents.ts';
 
 export interface AgentOptions {
   /** Stable identifier, assigned by the MissionManager (e.g. "agent-1"). */
@@ -19,9 +16,12 @@ export interface AgentOptions {
   definition: AgentDefinition;
   /** Nesting depth — root is 0. */
   depth: number;
+  /** Hard bound on nesting; needed to hide spawn_agent at the leaf. */
+  maxSpawnDepth?: number;
   cwd?: string;
   repository?: AgentSessionRepository;
-  toolProvider?: ToolProvider;
+  /** Injected by the factory; when absent, this conversation gets no spawn_agent tool. */
+  spawn?: SpawnHandler;
 }
 
 export class TaskExecutor {
@@ -29,22 +29,24 @@ export class TaskExecutor {
   private readonly task: string;
   private readonly definition: AgentDefinition;
   private readonly depth: number;
+  private readonly maxSpawnDepth?: number;
   private readonly cwd?: string;
   private readonly repository: AgentSessionRepository;
   private readonly ui: MissionUi;
-  private readonly toolProvider?: ToolProvider;
+  private readonly spawn?: SpawnHandler;
 
-  private session?: AgentSession;
+  private session?: DurableAgentSession;
 
   constructor(options: AgentOptions) {
     this.agentId = options.agentId;
     this.task = options.task;
     this.definition = options.definition;
     this.depth = options.depth;
+    this.maxSpawnDepth = options.maxSpawnDepth;
     this.cwd = options.cwd;
     this.repository = options.repository ?? new AgentSessionRepository();
     this.ui = options.ui;
-    this.toolProvider = options.toolProvider;
+    this.spawn = options.spawn;
   }
 
   /** The agent's transcript — pi owns it; valid until dispose(). */
@@ -59,11 +61,16 @@ export class TaskExecutor {
     return this.session!.getLastAssistantText() ?? '';
   }
 
-  /** Runs the agent: session → one prompt (pi drives the tool loop, including nested agent spawns). */
+  /** Runs the agent: fresh durable conversation → one prompt (pi-durable drives the tool loop, including spawn_agent). */
   async run(): Promise<AgentRunResult> {
     this.session = await this.repository.createSession({
       ...(this.cwd ? { cwd: this.cwd } : {}),
-      customTools: this.tools(),
+      agentContext: {
+        agentId: this.agentId,
+        depth: this.depth,
+        maxSpawnDepth: this.maxSpawnDepth,
+      },
+      ...(this.spawn ? { spawn: this.spawn } : {}),
     });
 
     this.ui.agentStarted(this.agentId, this.task);
@@ -117,18 +124,13 @@ export class TaskExecutor {
       this.task,
       '',
       'Notes:',
+
+      // TODO: If the tool isn't present then no need to pass this info
       '- Delegate by calling spawn_agent; pass the agent id (if definitions allow) and only the context the child needs.',
       '- Commit your working state with commit_state before handing control back or delegating.',
       '- Your final assistant message is what your parent (or the user) receives — make it a self-contained summary.',
     );
     return parts.join('\n');
-  }
-
-  private tools(): Array<ToolDefinition> | undefined {
-    return this.toolProvider?.tools({
-      agent: this.definition,
-      depth: this.depth,
-    });
   }
 
   private assertSession(): void {

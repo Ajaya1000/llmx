@@ -4,7 +4,7 @@ import {
   type TUI,
   TuiMainScreen,
 } from '@earendil-works/pi-tui';
-import type { MissionUi } from '../types.js';
+import type { MissionUi } from '../types.ts';
 
 /**
  *

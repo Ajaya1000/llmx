@@ -1,14 +1,13 @@
-import { TaskExecutor } from '../agent/agent.js';
-import type { AgentDefinition } from '../agent/agents.js';
-import type { AgentSessionRepository } from '../repository/agent-session.js';
-import type { ToolProvider } from '../tools/toolProvider.js';
-import type { MissionUi } from '../types.js';
+import { TaskExecutor } from '../agent/agent.ts';
+import type { AgentDefinition } from '../agent/agents.ts';
+import type { AgentSessionRepository } from '../durable/index.ts';
+import type { SpawnInput } from '../durable/spawn-tool.ts';
+import type { MissionUi } from '../types.ts';
 
 export interface TaskExecutorCreateContext {
   task: string;
   agentId: string;
   depth: number;
-  toolProvider?: ToolProvider;
 }
 
 export interface TaskExecutorFactory {
@@ -59,12 +58,48 @@ export class DefaultTaskExecutorFactory implements TaskExecutorFactory {
       task: context.task,
       definition,
       depth: context.depth,
+      maxSpawnDepth: this.maxSpawnDepth,
       cwd: this.cwd,
       repository: this.repository,
       ui: this.ui,
-      toolProvider: context.toolProvider,
+      // A leaf (one below the depth limit) can never spawn a child, so it
+      // must not even see the tool.
+      ...(context.depth < this.maxSpawnDepth - 1
+        ? { spawn: (input) => this.spawn(input) }
+        : {}),
     });
 
     return child;
+  }
+
+  /**
+   * Spawn a child agent: validate the parent's edge allowlist, create the
+   * child through `create()` (which owns depth + unknown-agent guards), run
+   * it, and return its final text. This is the `spawn_agent` tool's handler.
+   */
+  async spawn(input: SpawnInput): Promise<string | undefined> {
+    const parent = this.agentDefs.find((d) => d.id === input.parentAgentId);
+    const allowed = parent?.edges.map((edge) => edge.target) ?? [];
+
+    if (allowed.length > 0 && !allowed.includes(input.agent)) {
+      throw new Error(
+        `spawn_agent refused: "${input.parentAgentId}" may only spawn ` +
+          `[${allowed.join(', ')}] (its declared edges), not "${input.agent}".`,
+      );
+    }
+
+    const child = this.create({
+      task: input.task,
+      agentId: input.agent,
+      depth: input.parentDepth + 1,
+    });
+
+    try {
+      const result = await child.run();
+      return result.text || '(no output)';
+    } catch (err) {
+      const e = err as Error;
+      throw new Error(`Agent ${child.agentId} failed: ${e.name}: ${e.message}`);
+    }
   }
 }

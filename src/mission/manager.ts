@@ -1,16 +1,13 @@
-import { type AgentDefinition, loadAgents } from '../agent/agents.js';
+import { type AgentDefinition, loadAgents } from '../agent/agents.ts';
 import {
   DefaultTaskExecutorFactory,
   type TaskExecutorFactory,
-} from '../factory/taskExecutorFactory.js';
-import { AgentSessionRepository } from '../repository/agent-session.js';
-import {
-  DefaultToolProvider,
-  type ToolProvider,
-} from '../tools/toolProvider.js';
-import type { Mission, MissionResult, MissionUi } from '../types.js';
-import { LogMissionUi } from './logger.js';
-import { TuiMissionUi } from './tui.js';
+} from '../agent/taskExecutorFactory.ts';
+import { closeDurableHarness } from '../durable/durable-harness.ts';
+import { AgentSessionRepository } from '../durable/index.ts';
+import type { Mission, MissionResult, MissionUi } from '../types.ts';
+import { LogMissionUi } from './logger.ts';
+import { TuiMissionUi } from './tui.ts';
 
 export enum MissionUIType {
   TUI, // terminal UI
@@ -35,7 +32,6 @@ export class MissionManager {
   private readonly mission: Mission;
   private agentDefs?: AgentDefinition[];
   private taskExecutorFactory?: TaskExecutorFactory;
-  private toolProvider?: ToolProvider;
 
   constructor(options: MissionManagerOptions) {
     this.maxSpawnDepth = options.maxSpawnDepth ?? 8;
@@ -64,28 +60,26 @@ export class MissionManager {
       cwd: this.cwd,
     });
 
-    const _toolProvider = new DefaultToolProvider({
-      factory: _taskExecutorFactory,
-    });
-
     this.taskExecutorFactory = _taskExecutorFactory;
-    this.toolProvider = _toolProvider;
 
     const entry = _taskExecutorFactory.create({
       task: this.mission.entry.task,
       agentId: this.mission.entry.name,
       depth: 0,
-      toolProvider: _toolProvider,
     });
 
-    const result = await entry.run();
+    try {
+      const result = await entry.run();
 
-    if (this.uiType === MissionUIType.TUI && this.ui instanceof TuiMissionUi)
-      this.ui.dispose();
+      if (this.uiType === MissionUIType.TUI && this.ui instanceof TuiMissionUi)
+        this.ui.dispose();
 
-    return {
-      goal: this.mission.goal,
-      result,
-    };
+      return {
+        goal: this.mission.goal,
+        result,
+      };
+    } finally {
+      await closeDurableHarness();
+    }
   }
 }

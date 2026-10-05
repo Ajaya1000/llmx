@@ -1,11 +1,14 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type {
-  AgentSession,
   AgentSessionEvent,
-  ToolDefinition,
-} from '@earendil-works/pi-coding-agent';
+  DurableAgentSession,
+} from './durable/durable-session.ts';
 
-export type { AgentSession, AgentSessionEvent, ToolDefinition };
+export type {
+  AgentMessage,
+  AgentSessionEvent,
+  DurableAgentSession as AgentSession,
+};
 
 /** A pi transcript message (user / assistant / toolResult) — the unit of every agent session. */
 export type SessionMessage = AgentMessage;

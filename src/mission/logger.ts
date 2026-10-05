@@ -1,4 +1,4 @@
-import type { MissionUi } from '../types.js';
+import type { MissionUi } from '../types.ts';
 
 /**
  * Plain terminal logging implementation of MissionUi. Prints lifecycle

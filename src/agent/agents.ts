@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { load as loadYaml } from 'js-yaml';
-import { z } from 'zod';
+import { type Static, Type } from 'typebox';
+import { Check, Clone, Default, Errors } from 'typebox/value';
 
 /** A loaded agent definition — structured front matter + the procedural body. */
 export interface AgentDefinition {
@@ -35,40 +36,38 @@ export class AgentParseError extends Error {
 
 /*
  * Runtime validation boundary: YAML front matter is external data, so TS
- * types alone can't guarantee its shape — zod is used only here.
+ * types alone can't guarantee its shape — typebox is used only here.
  */
-const predicateSchema = z.object({
-  required: z.record(z.string(), z.unknown()).optional(),
-});
-
-const agentFileSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  description: z.string().min(1),
-  preState: predicateSchema.default({}),
-  postState: z
-    .object({
-      sets: z.record(z.string(), z.unknown()).optional(),
-    })
-    .default({}),
-  tools: z.array(z.string()).default([]),
-  edges: z
-    .array(
-      z.object({
-        id: z.string().min(1),
-        target: z.string().min(1),
-        forwardDescription: z.string().default(''),
-        backwardDescription: z.string().default(''),
-        condition: z.string().min(1),
-      }),
-    )
-    .default([]),
-  metadata: z
-    .object({
-      created: z.string().default(''),
-    })
-    .default({}),
-  body: z.string().min(1),
+const agentFileSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  title: Type.String({ minLength: 1 }),
+  description: Type.String({ minLength: 1 }),
+  preState: Type.Object(
+    { required: Type.Optional(Type.Record(Type.String(), Type.Unknown())) },
+    { default: {} },
+  ),
+  postState: Type.Object(
+    { sets: Type.Optional(Type.Record(Type.String(), Type.Unknown())) },
+    { default: {} },
+  ),
+  tools: Type.Array(Type.String(), { default: [] }),
+  edges: Type.Array(
+    Type.Object({
+      id: Type.String({ minLength: 1 }),
+      target: Type.String({ minLength: 1 }),
+      forwardDescription: Type.String({ default: '' }),
+      backwardDescription: Type.String({ default: '' }),
+      condition: Type.String({ minLength: 1 }),
+    }),
+    { default: [] },
+  ),
+  metadata: Type.Object(
+    {
+      created: Type.String({ default: '' }),
+    },
+    { default: { created: '' } },
+  ),
+  body: Type.String({ minLength: 1 }),
 });
 
 /** One agent per directory: `<agentsDir>/<domain>/<slug>/agent.md`, id = directory slug. */
@@ -127,16 +126,21 @@ export async function loadAgentFile(
     throw new AgentParseError('YAML front matter must be a mapping', filePath);
   }
 
-  const { data, error } = agentFileSchema.safeParse({
-    body: match[2],
-    ...frontMatter,
-  });
-  if (error) {
+  const candidate = Default(
+    agentFileSchema,
+    Clone({ body: match[2], ...frontMatter }),
+  );
+  if (!Check(agentFileSchema, candidate)) {
     throw new AgentParseError(
-      `Agent validation failed: ${JSON.stringify(error.issues, null, 2)}`,
+      `Agent validation failed: ${JSON.stringify(
+        [...Errors(agentFileSchema, candidate)],
+        null,
+        2,
+      )}`,
       filePath,
     );
   }
+  const data = candidate as Static<typeof agentFileSchema>;
 
   const slug = slugName ?? path.basename(path.dirname(filePath));
   if (data.id !== slug) {

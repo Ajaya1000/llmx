@@ -5,6 +5,7 @@
     "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": ".",
+    "rewriteRelativeImportExtensions": true,
     "strict": true,
     "declaration": true,
     "esModuleInterop": true,
