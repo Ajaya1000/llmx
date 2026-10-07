@@ -1,6 +1,8 @@
 /**
- * Public surface of the evolution framework — interfaces and types only.
- * No implementation classes; the runtime adapter (out of scope) wires them.
+ * Public surface of the evolution framework. Ports as types, plus the
+ * composition root (`Evolution`) — the client provides a trajectory and the
+ * two model/harness seams (`Judger`, `RunRunner`); everything else derives
+ * and drives itself. Concrete per-module classes stay on their module paths.
  */
 
 export type { BackPressure } from './back-pressure.ts';
@@ -21,17 +23,31 @@ export type {
 export type { Executor } from './executor.ts';
 export type { Gate, GateDecision } from './gate.ts';
 export type { Pinpointer } from './pinpoint.ts';
-export type { TaskObserver, TrajectoryQuery, WikiPort } from './ports.ts';
+export type {
+  ContextStore,
+  ModelCall,
+  TaskObserver,
+  TrajectoryQuery,
+  WikiPort,
+} from './ports.ts';
 export type { PatchProposer } from './proposer.ts';
+export {
+  Evolution,
+  type EvolutionOptions,
+  type EvolutionResult,
+} from './runtime.ts';
 export type {
   ApprovedPatch,
   ApprovedPatchStore,
 } from './store/approved-patches.ts';
 export type { ContextRegistry } from './store/context-registry.ts';
+export { InMemoryContextStore } from './store/context-store.ts';
 export type { RetentionOptions, RetentionPolicy } from './store/retention.ts';
 export type { TrajectoryStore } from './store/trajectory.ts';
+export { InMemoryTrajectoryStore } from './store/trajectory.ts';
 export type { WikiMaintainer } from './store/wiki.ts';
 export type { WikiPersistence } from './store/wiki-persistence.ts';
+export { SqliteWikiPersistence } from './store/wiki-persistence.ts';
 export type {
   DistilledEntry,
   DistilledLog,
@@ -39,6 +55,7 @@ export type {
   Run,
   TrajectoryDistiller,
 } from './trajectory-distiller.ts';
+export { PromptedJudger } from './trajectory-distiller.ts';
 export type {
   Author,
   Context,

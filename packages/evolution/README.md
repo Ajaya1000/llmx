@@ -6,9 +6,12 @@ graph, and run the two-phase loop — **Eval** (derive distinct, context-specifi
 test instances) then **Evolve** (propose → validate → retry → gate).
 
 Every component exposes a TypeScript interface (port) and depends only on other
-interfaces — no runtime, storage backend, or pi-durable dependency. In-memory
-implementations are provided for tests; a `better-sqlite3` wiki persistence is
-the default store.
+interfaces — no runtime, storage backend, or pi-durable dependency. The
+composition root (`Evolution`) ships in the package: the client provides the
+trajectory (usage), the context store (definitions, read & write), a raw
+model call, and the harness seam (`RunRunner`) — the framework owns every
+prompt, including judging (`PromptedJudger`); everything else derives and
+drives itself (see [WIRING.md](./WIRING.md)).
 
 ## Layout
 

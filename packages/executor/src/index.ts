@@ -1,6 +1,9 @@
 export * from './agent/agent.ts';
 export * from './agent/agents.ts';
+export { createBuiltinModels } from './durable/builtin-models.ts';
 export * from './durable/index.ts';
+export { resolveAgentModel } from './durable/model-resolution.ts';
+export { LogMissionUi } from './mission/logger.ts';
 export * from './mission/manager.ts';
 export * from './mission/tui.ts';
 export * from './mission/wiki.ts';
