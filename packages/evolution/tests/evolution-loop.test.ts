@@ -2,19 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   DefaultEvolutionLoop,
   type PatchApplier,
-} from '../../src/evolution/evolution-loop.ts';
-import type { WikiPort } from '../../src/evolution/ports.ts';
-import type { PatchProposer } from '../../src/evolution/proposer.ts';
-import { InMemoryContextRegistry } from '../../src/evolution/store/context-registry.ts';
-import {
-  DefaultVerifier,
-  type RunRunner,
-} from '../../src/evolution/verifier.ts';
-import type {
-  ContextPatch,
-  Verdict,
-  WikiRow,
-} from '../../src/evolution/wiki-types.ts';
+} from '../src/evolution-loop.ts';
+import type { WikiPort } from '../src/ports.ts';
+import type { PatchProposer } from '../src/proposer.ts';
+import { InMemoryContextRegistry } from '../src/store/context-registry.ts';
+import { DefaultVerifier, type RunRunner } from '../src/verifier.ts';
+import type { ContextPatch, Verdict, WikiRow } from '../src/wiki-types.ts';
 
 const failure: WikiRow = {
   id: 'f1',

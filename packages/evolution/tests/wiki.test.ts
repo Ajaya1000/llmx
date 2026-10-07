@@ -2,15 +2,15 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DefaultPinpointer } from '../../src/evolution/pinpoint.ts';
-import { InMemoryContextRegistry } from '../../src/evolution/store/context-registry.ts';
-import { InMemoryTrajectoryStore } from '../../src/evolution/store/trajectory.ts';
-import { DefaultWikiMaintainer } from '../../src/evolution/store/wiki.ts';
+import { DefaultPinpointer } from '../src/pinpoint.ts';
+import { InMemoryContextRegistry } from '../src/store/context-registry.ts';
+import { InMemoryTrajectoryStore } from '../src/store/trajectory.ts';
+import { DefaultWikiMaintainer } from '../src/store/wiki.ts';
 import {
   InMemoryWikiPersistence,
   SqliteWikiPersistence,
-} from '../../src/evolution/store/wiki-persistence.ts';
-import type { WikiRow } from '../../src/evolution/wiki-types.ts';
+} from '../src/store/wiki-persistence.ts';
+import type { WikiRow } from '../src/wiki-types.ts';
 
 function row(partial: Partial<WikiRow> & { id: string }): WikiRow {
   return {

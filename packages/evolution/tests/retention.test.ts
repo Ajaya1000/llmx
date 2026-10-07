@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DefaultRetentionPolicy } from '../../src/evolution/store/retention.ts';
-import type { WikiRow } from '../../src/evolution/wiki-types.ts';
+import { DefaultRetentionPolicy } from '../src/store/retention.ts';
+import type { WikiRow } from '../src/wiki-types.ts';
 
 function row(partial: Partial<WikiRow> & { id: string }): WikiRow {
   return {

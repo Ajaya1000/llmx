@@ -1,16 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DefaultPinpointer,
-  toCulprit,
-  toLocation,
-} from '../../src/evolution/pinpoint.ts';
-import { InMemoryContextRegistry } from '../../src/evolution/store/context-registry.ts';
-import { InMemoryTrajectoryStore } from '../../src/evolution/store/trajectory.ts';
-import type {
-  Context,
-  ContextKind,
-  TaskEvent,
-} from '../../src/evolution/types.ts';
+import { DefaultPinpointer, toCulprit, toLocation } from '../src/pinpoint.ts';
+import { InMemoryContextRegistry } from '../src/store/context-registry.ts';
+import { InMemoryTrajectoryStore } from '../src/store/trajectory.ts';
+import type { Context, ContextKind, TaskEvent } from '../src/types.ts';
 
 function task(partial: Partial<TaskEvent> & { id: string }): TaskEvent {
   return {

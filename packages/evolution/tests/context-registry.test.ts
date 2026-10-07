@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { InMemoryContextRegistry } from '../../src/evolution/store/context-registry.ts';
-import type { Context } from '../../src/evolution/types.ts';
+import { InMemoryContextRegistry } from '../src/store/context-registry.ts';
+import type { Context } from '../src/types.ts';
 
 function ctx(id: string, dependsOn: string[] = []): Context {
   return { id, kind: 'skill', content: '', dependsOn };

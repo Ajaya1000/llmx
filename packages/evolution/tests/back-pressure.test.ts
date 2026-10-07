@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DefaultBackPressure } from '../../src/evolution/back-pressure.ts';
+import { DefaultBackPressure } from '../src/back-pressure.ts';
 
 describe('DefaultBackPressure', () => {
   it('one push yields one authored row with both refs', () => {

@@ -1,6 +1,6 @@
-import { createModels, type Models } from '@earendil-works/pi-ai';
 import type { ConversationCreateOptions } from '@earendil-works/pi-durable';
 import { AgentContextDoc } from './agent-context.js';
+import { createBuiltinModels } from './builtin-models.js';
 import {
   ctx,
   type DurableHarnessConfig,
@@ -43,7 +43,9 @@ export class AgentSessionRepository {
   ): Promise<DurableAgentSession> {
     const harness = await getDurableHarness(params.harness);
 
-    const model = resolveAgentModel(params.harness?.models ?? createModels());
+    const model = await resolveAgentModel(
+      params.harness?.models ?? (await createBuiltinModels()),
+    );
 
     const conversationOption: ConversationCreateOptions = {
       ownership: { kind: 'ownerless' },

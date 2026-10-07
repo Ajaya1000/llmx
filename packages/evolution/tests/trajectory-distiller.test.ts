@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { InMemoryTrajectoryStore } from '../../src/evolution/store/trajectory.ts';
+import { InMemoryTrajectoryStore } from '../src/store/trajectory.ts';
 import {
   DefaultTrajectoryDistiller,
   type DistilledEntry,
   type Judger,
   type Run,
-} from '../../src/evolution/trajectory-distiller.ts';
-import type { TaskEvent } from '../../src/evolution/types.ts';
+} from '../src/trajectory-distiller.ts';
+import type { TaskEvent } from '../src/types.ts';
 
 function task(partial: Partial<TaskEvent> & { id: string }): TaskEvent {
   return {

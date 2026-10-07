@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { createModels, type Models } from '@earendil-works/pi-ai';
+import type { Models } from '@earendil-works/pi-ai';
 import { createRegistry, Harness } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
+import { createBuiltinModels } from './builtin-models.js';
 
 /** Context passed to every pi-durable call. */
 export const ctx = BACKGROUND_CONTEXT;
@@ -27,10 +29,29 @@ export function getDurableHarness(
   openPromise ??= (async () => {
     const registry = createRegistry();
     config.installExtensions?.(registry);
-    const models = config.models ?? createModels();
+    const models = config.models ?? (await createBuiltinModels());
     const storagePath = config.storagePath ?? 'data/durable.sqlite';
     const storage = await openNodeSqliteStorage(storagePath);
-    return Harness.open(storage, { models, registry }, ctx);
+    return Harness.open(
+      storage,
+      {
+        models,
+        registry,
+        // opencode-go rejects requests without a session routing header
+        // ("MissingSessionID"); other providers ignore unknown x-* headers.
+        // ponytail: harness-wide static headers; move to per-conversation
+        // stream options if any provider ever rejects unknown headers.
+        settings: {
+          stream: {
+            headers: {
+              'x-opencode-session': randomUUID(),
+              'x-opencode-client': 'llmx',
+            },
+          },
+        },
+      },
+      ctx,
+    );
   })();
   return openPromise;
 }

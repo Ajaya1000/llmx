@@ -1,15 +1,17 @@
 # Evolution Framework — Implementation Plan
 
-**Status:** Planned — restructured 2026-10-06 to match
-`docs/architecture/evolution.excalidraw`. No implementation begun beyond the
-four done groups.
+**Status:** All in-scope components implemented — interfaces + in-memory
+defaults for the trajectory store, wiki, eval store, distillers, proposer,
+verifier, gate, and evolution loop. Runtime wiring (Executor, substrate
+adapter, distiller hooks) remains out of scope.
 
 ## Constraints
 
-1. Everything lives under `src/evolution/`.
+1. Everything lives under `packages/evolution/src/` — a standalone npm
+   workspace (`@llmx/evolution`).
 2. **Interface-first:** every component exposes a TypeScript *interface* (port)
    and depends only on other interfaces. No component imports an implementation,
-   pi-durable, or any existing `src/` module.
+   pi-durable, or any root `src/` module.
 3. Implementations plug in **behind** the ports (in-memory for tests, SQLite as
    the default wiki, a substrate adapter later) and are swappable.
 4. **Do not modify any existing source file.** Executor/substrate wiring is a
@@ -64,50 +66,64 @@ patches contexts only) and `PatchHypothesis { targetKind, targetId, diff }`
 (`wiki-types.ts` is amended: `PatchHypothesis`/`PatchTarget` → `ContextPatch`,
 `CulpritKind` → `ContextKind`).
 
-## Flow (from evolution.excalidraw + context graph)
+## Flow — two phases: Eval, then Evolve
+
+A failed trajectory drives two phases, in order:
+
+- **Phase 1 — Eval (before any patch).** Derive candidate test instances from
+  the failing input, scoped to the relevant contexts (culprit + dependents);
+  persist only if **distinct** from that context's existing evals (dedup by
+  input + coverage/novelty, §13–15). Each context ends with its own eval set.
+- **Phase 2 — Evolve.** The loop: propose → validate → bounded retry → gate →
+  distill verdicts. Validation runs the new test instance **and** the context's
+  persisted evals, so a patch must not regress prior instances.
 
 ```
 Executor(takes goal + trajectory) → produces → Trajectory
   → Trajectory Distiller → distilled log → WikiMaintainer → Wiki (patterns, strategies)
       → [Wiki Persistence store]
-  → derive test instances from the failing input (relevant contexts)
-      → persist only if valuable vs. that context's evals → [context evals]
-  → Patch Proposer → Context Patch (a patch to context)
-      → targets: tools · skills · agents.md (all context, linked by usage edges)
-  → Verifier (new test instance + context evals) → Success / Failure
-      → Verifier Distiller → wiki
-      → Approved patches retention
-  → on Failure: patch proposer loop continues
+  → [Phase 1 — Eval] derive test instances from the failing input (relevant contexts)
+      → persist only if distinct vs. that context's evals → [context evals]
+  → [Phase 2 — Evolve]
+      → Patch Proposer → Context Patch (a patch to context)
+          → targets: tools · skills · agents.md (all context, linked by usage edges)
+      → Verifier (new test instance + context evals) → Success / Failure
+          → Verifier Distiller → wiki
+          → Approved patches retention
+      → on Failure: patch proposer loop continues (bounded)
 ```
 
 ## Target layout
 
 ```
-src/evolution/
-  types.ts                  # done (amend: Context, ContextKind, ContextUsage)
-  task.ts                   # done (amend: contextsUsed + contextEdges)
-  wiki-types.ts             # done (amend: ContextPatch, CulpritKind = ContextKind)
-  ports.ts                  # done
-  eval.ts                   # ContextEval + ContextEvalStore + TestInstanceDeriver
-  executor.ts               # Executor port (interface only)
-  evolution-loop.ts         # propose → validate → bounded-retry orchestration
-  store/
-    trajectory.ts           # done (in-memory) — extend with context-edge index
-    context-registry.ts     # Context graph: dependents(), subgraph()
-    wiki.ts                 # WikiMaintainer + Wiki Persistence store
-    retention.ts            # eviction + top-k
-    approved-patches.ts     # approved patches retention
-  distill/
-    trajectory-distiller.ts # trajectory → distilled log
-    verifier-distiller.ts   # verifier outcomes → wiki rows
-  pinpoint.ts
-  back-pressure.ts
-  propose/
+packages/evolution/         # @llmx/evolution — standalone npm workspace
+  package.json
+  tsconfig.json
+  vitest.config.ts
+  src/
+    types.ts                # done
+    task.ts                 # done
+    wiki-types.ts           # done
+    ports.ts                # done
+    eval.ts                 # eval model + deriver + persistence
+    executor.ts             # Executor port (interface only)
+    evolution-loop.ts       # propose → validate → bounded-retry orchestration
+    pinpoint.ts             # graph-aware blame
+    back-pressure.ts        # correction push
     proposer.ts             # → Context Patch (graph-aware)
-  verify/
-    verifier.ts             # C + C' → success/failure (validates dependents too)
-  gate.ts
-  index.ts                  # interfaces only
+    verifier.ts             # C + C' → success/failure
+    verifier-distiller.ts   # verdicts → wiki rows
+    trajectory-distiller.ts # trajectory → distilled log
+    gate.ts                 # human approval
+    index.ts                # interfaces only
+    store/
+      trajectory.ts
+      context-registry.ts
+      wiki.ts
+      wiki-persistence.ts
+      retention.ts
+      approved-patches.ts
+  tests/                    # one spec per module
 ```
 
 ## Todos
@@ -154,41 +170,42 @@ src/evolution/
 - [x] **12. Back-pressure** — `back-pressure.ts`
   - [x] `BackPressure` interface: `push(blamedRef, correction, author)` → a `back_pressure` row (edge-by-edge only).
   - [x] Self-check: one push → one authored row with both refs.
-- [x] **13. Patch Proposer (graph-aware)** — `proposer.ts`
+- [x] **13. Eval model** — `eval.ts`
+  - [x] `ContextEval { id, contextId, input, expected?, source: 'failure'|'human'|'seed', createdAt }` — a persisted test instance for one context.
+  - [x] `EvalCandidate` (deriver output, before id/createdAt) vs. `ContextEval` (persisted).
+  - [x] `ContextEvalStore` interface: `evalsFor(contextId)`, `worthAdding(contextId, candidate)`, `persist(candidate)`.
+  - [x] `TestInstanceDeriver` interface: `derive(failingTrajectory, relevantContexts) → EvalCandidate[]`.
+- [x] **14. Test Instance Deriver** — impl in `eval.ts`
+  - [x] From the currently failing input (trajectory) + relevant contexts (culprit + dependents, §11), derive candidate test instances per context.
+  - [x] Runs **before** the evolution loop proposes anything.
+  - [x] Self-check: a failing input with a `tool` culprit yields a candidate bound to that tool's context.
+- [x] **15. Eval persistence + value assessment** — impl in `eval.ts`
+  - [x] `worthAdding` compares a candidate against the context's existing evals (dedup by input; coverage/novelty is the pluggable assessor seam) — default dedup-by-input.
+  - [x] Persist only when valuable; each context ends with its own eval set.
+  - [x] Self-check: identical candidate → `worthAdding` false; novel candidate → true and persisted.
+- [x] **16. Patch Proposer (graph-aware)** — `proposer.ts`
   - [x] `PatchProposer` interface: `propose(failures): ContextPatch[]`.
   - [x] Reads `WikiPort.prioritizedFailures()` + culprits; a culprit context yields a `ContextPatch { contextKind, contextId }`; dependents are included as affected (re-validate set).
   - [x] Self-check: a `tool` culprit yields a `ContextPatch { contextKind: 'tool' }` + dependent list.
-- [x] **14. Context Patch type** — amend `wiki-types.ts`
+- [x] **17. Context Patch type** — amend `wiki-types.ts`
   - [x] `ContextPatch { contextId: string; contextKind: ContextKind; patch: string }`.
   - [x] Replace `PatchHypothesis` / `PatchTargetKind`; `CulpritKind = ContextKind`.
-- [x] **15. Verifier** — `verifier.ts`
+- [x] **18. Verifier** — `verifier.ts`
   - [x] `Verifier` interface: `verify(original: Context[], patched: Context[], patch: ContextPatch): Verdict`.
-  - [x] Runs **new test instance + the context's persisted evals (§19–21)** on a forked/replay branch via the injected `RunRunner` seam; **re-runs the patched context and its dependents**; never live (runtime wiring out of scope).
+  - [x] Runs **new test instance + the context's persisted evals (§13–15)** on a forked/replay branch via the injected `RunRunner` seam; **re-runs the patched context and its dependents**; never live (runtime wiring out of scope).
   - [x] Success / Failure verdict with `evidenceRefs`; failure → back to proposer (bounded retries, `DEFAULT_MAX_RETRIES = 3`, exposed as `Verifier.maxRetries`).
   - [x] Self-check: fake RunRunner passes once, fails once; assert verdict + retry bound.
-- [ ] **16. Verifier Distiller** — `verifier-distiller.ts`
-  - [ ] `VerifierDistiller` interface: `distill(verdicts): WikiRow[]` — success/failure → strategy/failure rows keyed by context.
-  - [ ] Self-check: a failing verdict → a `failure` row; a passing one → a `strategy` row.
-- [ ] **17. Approved patches retention** — `store/approved-patches.ts`
-  - [ ] `ApprovedPatchStore` interface: `retain(patch, verdict)`, `list()`.
-  - [ ] Self-check: retain → list round-trip.
-- [ ] **18. Human gate** — `gate.ts`
-  - [ ] `Gate` interface: `review(verdict) → approved|rejected`; only passed verdicts reach it.
-  - [ ] Self-check: a failing verdict never reaches `review`.
-- [ ] **19. Eval model** — `eval.ts`
-  - [ ] `ContextEval { id, contextId, input, expected?, source: 'failure'|'human'|'seed', createdAt }` — a persisted test instance for one context.
-  - [ ] `ContextEvalStore` interface: `evalsFor(contextId)`, `worthAdding(contextId, candidate)`, `persist(eval)`.
-  - [ ] `TestInstanceDeriver` interface: `derive(failingTrajectory, relevantContexts) → ContextEval[]`.
-- [ ] **20. Test Instance Deriver** — impl in `eval.ts`
-  - [ ] From the currently failing input (trajectory) + relevant contexts (culprit + dependents, §11), derive candidate test instances per context.
-  - [ ] Runs **before** the evolution loop proposes anything.
-  - [ ] Self-check: a failing input with a `tool` culprit yields a candidate bound to that tool's context.
-- [ ] **21. Eval persistence + value assessment** — impl in `eval.ts`
-  - [ ] `worthAdding` compares a candidate against the context's existing evals (dedup by input + coverage/novelty) — pluggable heuristic, default dedup-by-input.
-  - [ ] Persist only when valuable; each context ends with its own eval set.
-  - [ ] Self-check: identical candidate → `worthAdding` false; novel candidate → true and persisted.
-- [ ] **22. Public surface** — `index.ts`
-  - [ ] Export interfaces and types only. No implementation classes, no pi-durable, no existing `src/` imports.
+- [x] **19. Verifier Distiller** — `verifier-distiller.ts`
+  - [x] `VerifierDistiller` interface: `distill(verdicts): WikiRow[]` — success/failure → strategy/failure rows keyed by context.
+  - [x] Self-check: a failing verdict → a `failure` row; a passing one → a `strategy` row.
+- [x] **20. Approved patches retention** — `store/approved-patches.ts`
+  - [x] `ApprovedPatchStore` interface: `retain(patch, verdict)`, `list()`.
+  - [x] Self-check: retain → list round-trip.
+- [x] **21. Human gate** — `gate.ts`
+  - [x] `Gate` interface: `review(verdict) → approved|rejected`; only passed verdicts reach it.
+  - [x] Self-check: a failing verdict never reaches `review`.
+- [x] **22. Public surface** — `index.ts`
+  - [x] Export interfaces and types only. No implementation classes, no pi-durable, no existing `src/` imports.
 - [x] **23. Evolution loop orchestration** — `evolution-loop.ts`
   - [x] `EvolutionLoop` interface: `run(): EvolutionLoopResult` — one pass: wiki failures → propose → verify → bounded retry (failed verdict fed back to the proposer).
   - [x] `PatchApplier` seam (default `appendPatch`) produces the `patched` contexts; `DefaultEvolutionLoop` wires `WikiPort` + `PatchProposer` + `Verifier` + `ContextRegistry`.

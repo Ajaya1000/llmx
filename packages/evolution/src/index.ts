@@ -5,14 +5,28 @@
 
 export type { BackPressure } from './back-pressure.ts';
 export type {
+  ContextEval,
+  ContextEvalStore,
+  EvalCandidate,
+  EvalSource,
+  EvalValueAssessor,
+  FailingTrajectory,
+  TestInstanceDeriver,
+} from './eval.ts';
+export type {
   EvolutionLoop,
   EvolutionLoopResult,
   PatchApplier,
 } from './evolution-loop.ts';
 export type { Executor } from './executor.ts';
+export type { Gate, GateDecision } from './gate.ts';
 export type { Pinpointer } from './pinpoint.ts';
 export type { TaskObserver, TrajectoryQuery, WikiPort } from './ports.ts';
 export type { PatchProposer } from './proposer.ts';
+export type {
+  ApprovedPatch,
+  ApprovedPatchStore,
+} from './store/approved-patches.ts';
 export type { ContextRegistry } from './store/context-registry.ts';
 export type { RetentionOptions, RetentionPolicy } from './store/retention.ts';
 export type { TrajectoryStore } from './store/trajectory.ts';
@@ -40,6 +54,7 @@ export type {
   TranscriptRole,
 } from './types.ts';
 export type { RunOutcome, RunRunner, Verifier } from './verifier.ts';
+export type { VerifierDistiller } from './verifier-distiller.ts';
 export type {
   Blame,
   ContextPatch,

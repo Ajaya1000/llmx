@@ -19,22 +19,33 @@ blaming, and patching.
 | Wiki | curated, time-framed, bounded memory of distilled judgments |
 | Distiller | samples the trajectory, pinpoints culprits |
 | Back-pressure | ancestor → descendant failure feedback |
+| Test Instance Deriver | derives distinct, context-specific evals from the failing input — before evolution |
+| Eval store | per-context persisted evals (dedup'd); the Validator runs them |
 | Patch Proposer | proposes patches for any producer |
-| Validator | validates patches on a new test instance + previous evals |
+| Validator | validates patches on a new test instance + the context's evals |
 | Human gate | approves validated patches |
 
 **Communication** (the loop):
 
 ```mermaid
-flowchart LR
+flowchart TB
     RT[Agent runtime] -->|"TaskEvent"| TS[Trajectory store]
-    TS -->|"stream"| W[Wiki]
-    W --> PP[Patch Proposer]
-    PP --> V[Validator]
-    V -->|"forked runs"| RT
-    V -->|"verdict"| W
-    V -->|"validated patch"| H[Human gate]
-    H --> A[Artifacts]
+
+    subgraph eval["Phase 1 — Eval (before any patch)"]
+        TS --> ED[Test Instance Deriver]
+        ED -->|"distinct, context-specific"| ES[Context evals]
+    end
+
+    subgraph evolve["Phase 2 — Evolve (propose → validate → retry)"]
+        TS -->|"stream"| W[Wiki]
+        W --> PP[Patch Proposer]
+        PP --> V[Validator]
+        ES -->|"context evals"| V
+        V -->|"forked runs"| RT
+        V -->|"verdict"| W
+        V -->|"validated patch"| H[Human gate]
+        H --> A[Artifacts]
+    end
 ```
 
 Full component detail (distiller, back-pressure, artifacts, human input) is LLD §0.
@@ -55,6 +66,8 @@ flowchart TB
         W["Wiki"]
         D["Distiller"]
         BP["Back-pressure"]
+        ED["Test Instance Deriver"]
+        ES["Context evals"]
         PP["Patch Proposer"]
         V["Validator"]
     end
@@ -67,15 +80,18 @@ flowchart TB
     end
 
     RT -->|"1. TaskEvent, input to output"| TS
-    TS -->|"2. stream"| W
+    TS -->|"2. derive evals"| ED
+    ED -->|"3. persist distinct evals per context"| ES
+    TS -->|"4. stream"| W
     BP -->|"corrections, authored"| RT
     D -->|"queries"| TS
     D -->|"strategy or failure rows"| W
-    W -->|"3. prioritized failures and culprits"| PP
-    PP -->|"4. patch hypothesis"| V
-    V -->|"5. forked runs, new instance and evals"| RT
-    V -->|"6. verdict"| W
-    V -->|"7. validated patch"| H
+    W -->|"5. prioritized failures and culprits"| PP
+    PP -->|"6. patch hypothesis"| V
+    ES -->|"context evals"| V
+    V -->|"7. forked runs, new instance + evals"| RT
+    V -->|"8. verdict"| W
+    V -->|"9. validated patch"| H
     H -->|"approved"| AG & SK & TL & CX
 ```
 
@@ -138,9 +154,20 @@ classDiagram
     }
 
     class Verdict {
-        +hypothesisId string
+        +patch ContextPatch
         +pass boolean
         +evidenceRefs Ref[]
+        +reason string
+    }
+
+    class ContextEval {
+        <<per-context test instance>>
+        +id Ref
+        +contextId Ref
+        +input string
+        +expected string
+        +source failure/human/seed
+        +createdAt number
     }
 
     TaskEvent --> Record : contains
@@ -148,6 +175,7 @@ classDiagram
     WikiRow --> Blame : materializes
     ContextPatch --> WikiRow : proposed from
     Verdict --> ContextPatch : judges
+    Verdict --> ContextEval : validated against
 ```
 
 Key relations:
@@ -167,6 +195,8 @@ Key relations:
 | `TrajectoryQuery` | trajectory store | `inputs(ref)`, `children(taskId)`, `ancestors(ref)`, `firstIntroduction(fact)` | store → readers |
 | `WikiPort` | wiki | `record(row)`, `pinpoint(fact)`, `prioritizedFailures()` | distiller → wiki, wiki → Patch Proposer |
 | `Distiller` | distiller | reads `TrajectoryQuery`, writes `WikiPort` | — |
+| `TestInstanceDeriver` | eval deriver | `derive(failingTrajectory, relevantContexts)` → `ContextEval[]` | trajectory → evals (before the loop) |
+| `ContextEvalStore` | eval store | `evalsFor(contextId)`, `worthAdding(contextId, candidate)`, `persist(eval)` | deriver → store, store → Validator |
 | `Proposer` | patch proposer | reads `WikiPort`, emits `ContextPatch` | wiki → proposer → validator |
 | `Validator` | validator | consumes `ContextPatch`, runs forked tasks, emits `Verdict` | proposer → validator → wiki + gate |
 
@@ -180,6 +210,9 @@ Rules of the conversation:
    original task input.
 4. **A patch is never applied in place**; it is validated on a *forked* run
    first, and the original trajectory is left intact for comparison.
+5. **Eval before evolve** — a failing input first derives **distinct**,
+   **context-specific** evals (persisted only when novel); the evolution loop
+   then runs against them, so a patch must not regress prior instances.
 
 ## 3. Runtime flow — wrong output, back-pressure, pinpoint
 
@@ -208,22 +241,36 @@ sequenceDiagram
     D->>W: strategy, pattern, failure rows, sampled and time-framed
 ```
 
-## 4. Evolution loop — propose, validate, gate
+## 4. Evolution loop — two phases: Eval, then Evolve
+
+A failing trajectory drives two phases, in order:
+
+1. **Eval (first).** The `Test Instance Deriver` derives candidate test
+   instances from the failing input, scoped to the relevant contexts (culprit +
+   dependents). A candidate is persisted only if it is **distinct** from that
+   context's existing evals — `worthAdding` dedups by input + coverage/novelty —
+   so each context ends with its own eval set. Nothing is proposed yet.
+2. **Evolve.** The loop below proposes, validates, and gates. Validation runs
+   the new test instance **and** the context's persisted evals on forked
+   branches, so a patch must fix the current failure without regressing prior
+   ones.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant W as Wiki
+    participant ES as Context evals
     participant PP as Patch Proposer
     participant V as Validator
     participant R as Agent runtime
     participant H as Human gate
     participant A as Evolvable artifacts
 
+    Note over ES: Phase 1 — Eval — already persisted distinct per-context evals
     W->>PP: prioritized failures and culprits, with referenced trajectory
     PP-->>V: patch hypothesis for agent, skill, tool, or context
     V->>R: fork the blamed run, apply the patch
-    V->>R: run new test instance and previous evals, forked
+    V->>ES: run new test instance + this context's persisted evals, forked
     R-->>V: outcomes, each a recorded task
     V-->>W: verdict: pass then gate, or fail back to proposer, bounded
     V-->>H: validated patch, pass only

@@ -4,18 +4,19 @@ Task execution system for LLMs: composes only the skills/tools relevant to one t
 
 ## Commands
 
-- `npm run typecheck` — tsc --noEmit
-- `npm test` — vitest run
+- `npm run typecheck` — tsc --noEmit (all workspaces)
+- `npm test` — vitest run (all workspaces)
 - `npm run lint` / `npm run fix` — biome check (fix auto-applies)
-- `npm run build` — tsc
+- `npm run build` — tsc (all workspaces)
 
 ## Layout
 
-- `src/agent` — executor core
-- `src/mission` — task instances
-- `src/skills` — skill structure / graph
-- `src/durable`, `src/evolution` — state and skill evolution
-- `tests/` mirror `src/` (vitest, one file per module)
+- `packages/executor/src/agent` — executor core
+- `packages/executor/src/mission` — task instances
+- `packages/executor/src/skills` — skill structure / graph
+- `packages/executor/src/durable` — pi-durable state
+- `packages/evolution` — the self-improvement framework (separate npm workspace)
+- `packages/*/tests/` mirror each package's `src/` (vitest, one file per module)
 - `docs/adr`, `docs/architecture` — read before changing architecture
 
 ## Conventions

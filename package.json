@@ -3,16 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
     "lint": "biome check .",
     "format": "biome format --write .",
     "fix": "biome check --write ."
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "dependencies": {
     "@earendil-works/pi-agent-core": "^1.0.0",
     "@earendil-works/pi-coding-agent": "^1.0.0",

@@ -1,0 +1,39 @@
+{
+  "name": "@llmx/executor",
+  "version": "0.1.0",
+  "description": "LLMx task executor core: agent, pi-durable sessions, mission manager, skills, and the wiki.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "fix": "biome check --write src tests"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "^1.0.0",
+    "@earendil-works/pi-agent-core": "^1.0.0",
+    "@earendil-works/pi-ai": "^1.0.0",
+    "@earendil-works/pi-durable": "1.0.0",
+    "@earendil-works/pi-tui": "^1.0.0",
+    "js-yaml": "^5.4.2",
+    "typebox": "^1.3.27"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

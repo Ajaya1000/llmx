@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { DefaultPatchProposer } from '../../src/evolution/proposer.ts';
-import { InMemoryContextRegistry } from '../../src/evolution/store/context-registry.ts';
-import type { Context, ContextKind } from '../../src/evolution/types.ts';
-import type { Culprit, WikiRow } from '../../src/evolution/wiki-types.ts';
+import { DefaultPatchProposer } from '../src/proposer.ts';
+import { InMemoryContextRegistry } from '../src/store/context-registry.ts';
+import type { Context, ContextKind } from '../src/types.ts';
+import type { Culprit, WikiRow } from '../src/wiki-types.ts';
 
 function ctx(id: string, kind: ContextKind, dependsOn: string[] = []): Context {
   return { id, kind, content: '', dependsOn };

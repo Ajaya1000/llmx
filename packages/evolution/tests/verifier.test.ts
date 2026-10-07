@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Context } from '../../src/evolution/types.ts';
+import type { Context } from '../src/types.ts';
 import {
   DEFAULT_MAX_RETRIES,
   DefaultVerifier,
   type RunRunner,
-} from '../../src/evolution/verifier.ts';
-import type { ContextPatch } from '../../src/evolution/wiki-types.ts';
+} from '../src/verifier.ts';
+import type { ContextPatch } from '../src/wiki-types.ts';
 
 function ctx(id: string): Context {
   return { id, kind: 'tool', content: '', dependsOn: [] };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { InMemoryTrajectoryStore } from '../../src/evolution/store/trajectory.ts';
-import type { TaskEvent } from '../../src/evolution/types.ts';
+import { InMemoryTrajectoryStore } from '../src/store/trajectory.ts';
+import type { TaskEvent } from '../src/types.ts';
 
 function task(partial: Partial<TaskEvent> & { id: string }): TaskEvent {
   return {
