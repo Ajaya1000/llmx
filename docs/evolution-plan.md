@@ -90,6 +90,7 @@ src/evolution/
   ports.ts                  # done
   eval.ts                   # ContextEval + ContextEvalStore + TestInstanceDeriver
   executor.ts               # Executor port (interface only)
+  evolution-loop.ts         # propose → validate → bounded-retry orchestration
   store/
     trajectory.ts           # done (in-memory) — extend with context-edge index
     context-registry.ts     # Context graph: dependents(), subgraph()
@@ -160,11 +161,11 @@ src/evolution/
 - [x] **14. Context Patch type** — amend `wiki-types.ts`
   - [x] `ContextPatch { contextId: string; contextKind: ContextKind; patch: string }`.
   - [x] Replace `PatchHypothesis` / `PatchTargetKind`; `CulpritKind = ContextKind`.
-- [ ] **15. Verifier** — `verifier.ts`
-  - [ ] `Verifier` interface: `verify(original: Context[], patched: Context[], patch: ContextPatch): Verdict`.
-  - [ ] Runs **new test instance + the context's persisted evals (§19–21)** on a forked/replay branch (via injected `RunRunner`); **re-runs the patched context and its dependents**; never live.
-  - [ ] Success / Failure verdict with `evidenceRefs`; failure → back to proposer (bounded retries).
-  - [ ] Self-check: fake RunRunner passes once, fails once; assert verdict + retry bound.
+- [x] **15. Verifier** — `verifier.ts`
+  - [x] `Verifier` interface: `verify(original: Context[], patched: Context[], patch: ContextPatch): Verdict`.
+  - [x] Runs **new test instance + the context's persisted evals (§19–21)** on a forked/replay branch via the injected `RunRunner` seam; **re-runs the patched context and its dependents**; never live (runtime wiring out of scope).
+  - [x] Success / Failure verdict with `evidenceRefs`; failure → back to proposer (bounded retries, `DEFAULT_MAX_RETRIES = 3`, exposed as `Verifier.maxRetries`).
+  - [x] Self-check: fake RunRunner passes once, fails once; assert verdict + retry bound.
 - [ ] **16. Verifier Distiller** — `verifier-distiller.ts`
   - [ ] `VerifierDistiller` interface: `distill(verdicts): WikiRow[]` — success/failure → strategy/failure rows keyed by context.
   - [ ] Self-check: a failing verdict → a `failure` row; a passing one → a `strategy` row.
@@ -188,6 +189,11 @@ src/evolution/
   - [ ] Self-check: identical candidate → `worthAdding` false; novel candidate → true and persisted.
 - [ ] **22. Public surface** — `index.ts`
   - [ ] Export interfaces and types only. No implementation classes, no pi-durable, no existing `src/` imports.
+- [x] **23. Evolution loop orchestration** — `evolution-loop.ts`
+  - [x] `EvolutionLoop` interface: `run(): EvolutionLoopResult` — one pass: wiki failures → propose → verify → bounded retry (failed verdict fed back to the proposer).
+  - [x] `PatchApplier` seam (default `appendPatch`) produces the `patched` contexts; `DefaultEvolutionLoop` wires `WikiPort` + `PatchProposer` + `Verifier` + `ContextRegistry`.
+  - [x] `PatchProposer` extended with `revise(patch, verdict): ContextPatch | null` — a failed verdict returns to the proposer (Q12); default returns null (no model seam yet).
+  - [x] Self-check: pass-once, fail→revise→pass, fail→give-up, and the retry bound via a fake runner/proposer.
 
 ## Out of scope (later phase — requires touching existing code)
 

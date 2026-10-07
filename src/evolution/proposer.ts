@@ -1,6 +1,6 @@
 import type { ContextRegistry } from './store/context-registry.ts';
 import type { Ref } from './types.ts';
-import type { ContextPatch, WikiRow } from './wiki-types.ts';
+import type { ContextPatch, Verdict, WikiRow } from './wiki-types.ts';
 
 /**
  * Patch proposer. Maps prioritized failures to candidate patches: a failure's
@@ -9,6 +9,8 @@ import type { ContextPatch, WikiRow } from './wiki-types.ts';
  */
 export interface PatchProposer {
   propose(failures: WikiRow[]): ContextPatch[];
+  /** Revise a patch after a failed verdict; null = give up this retry. */
+  revise(patch: ContextPatch, verdict: Verdict): ContextPatch | null;
 }
 
 export class DefaultPatchProposer implements PatchProposer {
@@ -30,5 +32,10 @@ export class DefaultPatchProposer implements PatchProposer {
       });
     }
     return patches;
+  }
+
+  revise(_patch: ContextPatch, _verdict: Verdict): ContextPatch | null {
+    // ponytail: auto-revision needs a model seam; the loop just gives up.
+    return null;
   }
 }

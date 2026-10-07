@@ -108,7 +108,10 @@ export interface FailureLocation {
 
 /** Validation outcome for one hypothesis. */
 export interface Verdict {
-  hypothesisId: string;
+  /** The patch this verdict judges — binds the verdict to its hypothesis. */
+  patch: ContextPatch;
   pass: boolean;
   evidenceRefs: Ref[];
+  /** Optional short reason (e.g. which eval failed). */
+  reason?: string;
 }

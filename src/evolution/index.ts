@@ -4,6 +4,11 @@
  */
 
 export type { BackPressure } from './back-pressure.ts';
+export type {
+  EvolutionLoop,
+  EvolutionLoopResult,
+  PatchApplier,
+} from './evolution-loop.ts';
 export type { Executor } from './executor.ts';
 export type { Pinpointer } from './pinpoint.ts';
 export type { TaskObserver, TrajectoryQuery, WikiPort } from './ports.ts';
@@ -34,6 +39,7 @@ export type {
   TranscriptRecord,
   TranscriptRole,
 } from './types.ts';
+export type { RunOutcome, RunRunner, Verifier } from './verifier.ts';
 export type {
   Blame,
   ContextPatch,
