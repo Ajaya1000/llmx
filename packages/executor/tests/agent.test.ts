@@ -4,7 +4,7 @@ import type { AgentDefinition } from '../src/agent/agents.ts';
 import { DefaultTaskExecutorFactory } from '../src/agent/taskExecutorFactory.ts';
 import { createSpawnAgentTool } from '../src/durable/spawn-tool.ts';
 import { InMemoryWikiMaintainer } from '../src/mission/wiki.ts';
-import type { MissionUi } from '../src/types.ts';
+import type { AgentRunContext, MissionUi } from '../src/types.ts';
 
 function bareDef(
   overrides: Partial<AgentDefinition> & { id: string },
@@ -49,6 +49,8 @@ function fakeUi(events: FakeUiEvents): MissionUi {
 
 interface FakeSessionOptions {
   text?: string;
+  /** The run context getRunContext() reports. */
+  runContext?: AgentRunContext;
   /** Events the fake session delivers to subscribers during prompt(). */
   emitsDuringPrompt?: Array<{ type: string; toolName?: string }>;
   /** When set, prompt() rejects with this message. */
@@ -63,17 +65,23 @@ class FakeSession {
   > = [];
   disposeCount = 0;
   text: string;
+  readonly runContext: AgentRunContext;
   readonly emitsDuringPrompt: Array<{ type: string; toolName?: string }>;
   readonly throwDuringPrompt?: string;
 
   constructor(options: FakeSessionOptions = {}) {
     this.text = options.text ?? 'child summary';
+    this.runContext = options.runContext ?? { tools: [] };
     this.emitsDuringPrompt = options.emitsDuringPrompt ?? [];
     this.throwDuringPrompt = options.throwDuringPrompt;
   }
 
   getLastAssistantText(): string | undefined {
     return this.text;
+  }
+
+  getRunContext(): AgentRunContext {
+    return this.runContext;
   }
 
   subscribe(
@@ -101,6 +109,13 @@ function fakeRepository(session: FakeSession) {
     createSession: async () => session,
   } as never;
 }
+
+const childTrajectory = {
+  agentId: 'explore',
+  task: 'recon',
+  depth: 1,
+  steps: [],
+};
 
 describe('InMemoryWikiMaintainer', () => {
   it('records entries, returns lessons only, and exposes all entries', () => {
@@ -177,6 +192,67 @@ describe('TaskExecutor', () => {
 
     expect(agent.getFinalText()).toBe('final summary');
     expect(agent.getMessages()).toEqual([]);
+  });
+
+  it('exposes the subagent roster and strict delegation policy in the seed', async () => {
+    const session = new FakeSession({ text: 'ok' });
+    const agent = new TaskExecutor({
+      agentId: 'root',
+      task: 't',
+      definition: bareDef({
+        id: 'root',
+        edges: [
+          {
+            id: 'e1',
+            target: 'explore',
+            forwardDescription: 'hand over the repo state',
+            backwardDescription: '',
+            condition: 'always',
+          },
+        ],
+      }),
+      depth: 0,
+      repository: fakeRepository(session),
+      ui: fakeUi({ started: [], finished: [], events: [] }),
+      spawn: async () => undefined,
+      subagents: [
+        bareDef({
+          id: 'explore',
+          title: 'Explorer',
+          description: 'scans the repo',
+        }),
+      ],
+    });
+
+    await agent.run();
+
+    const seed = session.seeds[0];
+    expect(seed).toContain('## Available subagents (via spawn_agent)');
+    expect(seed).toContain('- explore — Explorer: scans the repo.');
+    expect(seed).toContain('Entering note: hand over the repo state');
+    expect(seed).toContain('## Delegation policy — strict');
+    expect(seed).toContain(
+      'you MUST delegate that step with spawn_agent. Never perform such a step yourself.',
+    );
+    expect(seed).toContain(
+      'Solve a step yourself only when no listed subagent covers it.',
+    );
+  });
+
+  it('omits every spawn_agent mention from the seed when it cannot spawn', async () => {
+    const session = new FakeSession({ text: 'ok' });
+    const agent = new TaskExecutor({
+      agentId: 'leaf',
+      task: 't',
+      definition: bareDef({ id: 'leaf' }),
+      depth: 0,
+      repository: fakeRepository(session),
+      ui: fakeUi({ started: [], finished: [], events: [] }),
+    });
+
+    await agent.run();
+
+    expect(session.seeds[0]).not.toContain('spawn_agent');
   });
 
   it('forwards session events emitted during the prompt to the ui for this agent', async () => {
@@ -286,6 +362,65 @@ describe('DefaultTaskExecutorFactory', () => {
     });
     expect(child.agentId).toBe('explore');
   });
+
+  it('seeds the executor with the subagent roster its edges allow (and only those)', async () => {
+    const session = new FakeSession({ text: 'ok' });
+    const factory = new DefaultTaskExecutorFactory({
+      ui: fakeUi({ started: [], finished: [], events: [] }),
+      repository: fakeRepository(session),
+      agentDefs: [
+        bareDef({
+          id: 'root',
+          edges: [
+            {
+              id: 'e1',
+              target: 'explore',
+              forwardDescription: '',
+              backwardDescription: '',
+              condition: 'always',
+            },
+            {
+              id: 'e2',
+              target: 'dig',
+              forwardDescription: '',
+              backwardDescription: '',
+              condition: 'always',
+            },
+          ],
+        }),
+        bareDef({ id: 'explore', title: 'Explorer' }),
+        bareDef({ id: 'dig', title: 'Digger' }),
+        bareDef({ id: 'rogue', title: 'Rogue' }),
+      ],
+      maxSpawnDepth: 8,
+    });
+
+    const root = factory.create({ task: 't', agentId: 'root', depth: 0 });
+    await root.run();
+
+    const seed = session.seeds[0];
+    expect(seed).toContain('- explore — Explorer:');
+    expect(seed).toContain('- dig — Digger:');
+    expect(seed).not.toContain('rogue');
+  });
+
+  it('seeds an edge-less executor with every other loaded agent as subagent', async () => {
+    const session = new FakeSession({ text: 'ok' });
+    const factory = new DefaultTaskExecutorFactory({
+      ui: fakeUi({ started: [], finished: [], events: [] }),
+      repository: fakeRepository(session),
+      agentDefs: [
+        bareDef({ id: 'root', title: 'Root' }),
+        bareDef({ id: 'explore', title: 'Explorer' }),
+      ],
+      maxSpawnDepth: 8,
+    });
+
+    const root = factory.create({ task: 't', agentId: 'root', depth: 0 });
+    await root.run();
+
+    expect(session.seeds[0]).toContain('- explore — Explorer:');
+  });
 });
 
 describe('spawn (factory edge policy)', () => {
@@ -322,6 +457,7 @@ describe('spawn (factory edge policy)', () => {
       factory.spawn({
         parentAgentId: 'debug-agent',
         parentDepth: 0,
+        callId: 'c1',
         agent: 'rogue',
         task: 'nope',
       }),
@@ -330,18 +466,27 @@ describe('spawn (factory edge policy)', () => {
     );
   });
 
-  it('spawns an allowed child and returns its output', async () => {
+  it('spawns an allowed child and returns its output and trajectory', async () => {
     const session = new FakeSession({ text: 'child done' });
     const factory = factoryWith([bareDef({ id: 'explore' })], session);
 
-    const text = await factory.spawn({
+    const spawned = await factory.spawn({
       parentAgentId: 'root',
       parentDepth: 2,
+      callId: 'c1',
       agent: 'explore',
       task: 'recon',
     });
 
-    expect(text).toBe('child done');
+    expect(spawned?.text).toBe('child done');
+    expect(spawned?.trajectory).toEqual({
+      agentId: 'explore',
+      task: 'recon',
+      depth: 3,
+      context: { tools: [] },
+      transcript: [],
+      steps: [],
+    });
     expect(session.seeds[0]).toContain('recon');
   });
 
@@ -355,10 +500,11 @@ describe('spawn (factory edge policy)', () => {
       await factory.spawn({
         parentAgentId: 'root',
         parentDepth: 0,
+        callId: 'c1',
         agent: 'explore',
         task: 't',
       }),
-    ).toBe('(no output)');
+    ).toMatchObject({ text: '(no output)' });
   });
 
   it('wraps child failures in a named error', async () => {
@@ -371,6 +517,7 @@ describe('spawn (factory edge policy)', () => {
       factory.spawn({
         parentAgentId: 'root',
         parentDepth: 0,
+        callId: 'c1',
         agent: 'explore',
         task: 't',
       }),
@@ -383,6 +530,7 @@ describe('spawn_agent tool (durable registration)', () => {
     return {
       snapshot: async () => ({ agentId: 'parent-1', depth: 1 }),
       conversationId: 'conv-1',
+      callId: 'call-1',
     } as never;
   }
 
@@ -390,7 +538,7 @@ describe('spawn_agent tool (durable registration)', () => {
     const seen: unknown[] = [];
     const tool = createSpawnAgentTool(async (input) => {
       seen.push(input);
-      return 'child summary';
+      return { text: 'child summary', trajectory: childTrajectory };
     });
 
     const result = await tool.execute(
@@ -403,6 +551,7 @@ describe('spawn_agent tool (durable registration)', () => {
     expect(seen[0]).toMatchObject({
       parentAgentId: 'parent-1',
       parentDepth: 1,
+      callId: 'call-1',
       agent: 'explore',
       task: 'recon',
     });

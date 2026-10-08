@@ -1,5 +1,13 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type {
+  JsonObject,
+  SystemMessage,
+  TextContent,
+  ThinkingContent,
+  ToolCall,
+  UserMessage,
+} from '@earendil-works/pi-ai';
+import type {
   AgentSessionEvent,
   DurableAgentSession,
 } from './durable/durable-session.ts';
@@ -43,11 +51,58 @@ export interface WikiMaintainer {
   lessons(): WikiEntry[];
 }
 
+/** A tool exactly as the model was offered it — its declaration. */
+export interface AgentToolDescription {
+  name: string;
+  description: string;
+  /** The tool's parameter schema, as JSON. */
+  parameters: JsonObject;
+}
+
+/** The resolved model-side context one agent ran with. */
+export interface AgentRunContext {
+  model?: { provider: string; modelId: string };
+  /** Every tool offered to the model, in offer order. */
+  tools: AgentToolDescription[];
+  /** The agent's instructions (system prompt text), when set. */
+  instructions?: string;
+}
+
+/** One recorded step in an agent's run, in order — provider shapes, unchanged. */
+export type TrajectoryStep =
+  | SystemMessage
+  | UserMessage
+  | TextContent
+  | ThinkingContent
+  | (ToolCall & {
+      /** The executed tool's result text, filled from the toolResult message. */
+      result: string;
+      isError: boolean;
+      /** The spawned agent's full trajectory, when this step was a spawn_agent call that ran a child. */
+      child?: AgentTrajectory;
+    });
+
+/** Everything one agent did in its run — the node unit of the trajectory tree. */
+export interface AgentTrajectory {
+  agentId: string;
+  task: string;
+  /** 0 for the entry agent; parent depth + 1 for spawned agents. Redundant with nesting, but makes flat rendering trivial. */
+  depth: number;
+  /** The model-side context this agent ran with — the "tools given" record. */
+  context: AgentRunContext;
+  /** The RAW transcript — every message verbatim, system messages included; nothing filtered, nothing flattened. */
+  transcript: SessionMessage[];
+  /** The derived, lossless ordered step view (readability + rendering); `transcript` stays the source of truth. */
+  steps: TrajectoryStep[];
+}
+
 /** One agent's own run result — its final text is what the parent's spawn tool call receives. */
 export interface AgentRunResult {
   agentId: string;
   text: string;
   transcript: SessionMessage[];
+  /** This agent's steps, with every spawned child nested under its spawn_agent step. */
+  trajectory: AgentTrajectory;
 }
 
 /** The final result of a mission. */
@@ -57,6 +112,8 @@ export interface MissionResult {
   // spawns: Array<{ parentId: string; childId: string; task: string }>;
   /** Every agent's final output. */
   result: AgentRunResult;
+  /** The entry agent's trajectory — every nested spawn included. */
+  trajectory: AgentTrajectory;
 }
 
 /**

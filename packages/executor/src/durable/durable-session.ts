@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import type { JsonObject } from '@earendil-works/pi-ai';
 import type {
   AgentEvent,
   AgentEventStream,
@@ -8,6 +9,7 @@ import type {
   Harness,
 } from '@earendil-works/pi-durable';
 import { watchEvents } from '@earendil-works/pi-durable';
+import type { AgentRunContext } from '../types.ts';
 
 /** Context passed to every pi-durable call. */
 const ctx = BACKGROUND_CONTEXT;
@@ -17,6 +19,8 @@ export interface AgentSessionLike {
   /** The durable transcript in model-context order; refreshed after prompt(). */
   readonly messages: AgentMessage[];
   getLastAssistantText(): string | undefined;
+  /** The resolved run context: model + the tools offered (with descriptions) + instructions. */
+  getRunContext(): AgentRunContext;
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   /** Durably admits the input as a submission and waits until it is answered or failed. */
   prompt(text: string): Promise<void>;
@@ -45,12 +49,17 @@ export class DurableAgentSession implements AgentSessionLike {
   /** Events observed before any subscriber attached. */
   private pending: AgentSessionEvent[] = [];
   private stream?: AgentEventStream;
+  private runContext: AgentRunContext = { tools: [] };
 
   constructor(
     public readonly harness: Harness,
     readonly conversation: Conversation,
   ) {
     void this.attachEvents();
+  }
+
+  getRunContext(): AgentRunContext {
+    return this.runContext;
   }
 
   getLastAssistantText(): string | undefined {
@@ -83,6 +92,8 @@ export class DurableAgentSession implements AgentSessionLike {
       ctx,
     );
     const settled = await submission.wait(ctx);
+    // Captured even on failure — a failed run still reports what it was given.
+    await this.captureRunContext();
     if (settled.status !== 'done') {
       throw new Error(`Agent prompt failed: ${JSON.stringify(settled)}`);
     }
@@ -98,6 +109,27 @@ export class DurableAgentSession implements AgentSessionLike {
   }
 
   // ---------------------------------------------------------------- privates
+
+  /** Resolves the offered tool set (with descriptions) and instructions from the conversation's agent state. */
+  private async captureRunContext(): Promise<void> {
+    const agent = await this.conversation.agent(ctx);
+    this.runContext = {
+      ...(agent.model
+        ? {
+            model: {
+              provider: agent.model.provider,
+              modelId: agent.model.modelId,
+            },
+          }
+        : {}),
+      tools: agent.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: (tool.parameters ?? {}) as JsonObject,
+      })),
+      ...(agent.instructions ? { instructions: agent.instructions } : {}),
+    };
+  }
 
   private deliver(event: AgentSessionEvent): void {
     for (const listener of this.listeners) listener(event);

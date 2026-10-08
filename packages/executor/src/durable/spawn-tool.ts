@@ -4,6 +4,7 @@ import {
   type ToolRegistration,
 } from '@earendil-works/pi-durable';
 import { type Static, Type } from 'typebox';
+import type { AgentTrajectory } from '../types.ts';
 import { AgentContextDoc } from './agent-context.ts';
 
 export const SpawnParams = Type.Object({
@@ -19,14 +20,24 @@ export const SpawnParams = Type.Object({
 export type SpawnInput = Static<typeof SpawnParams> & {
   parentAgentId: string;
   parentDepth: number;
+  /** The parent transcript's tool call id — the child's trajectory nests under that exact step. */
+  callId: string;
 };
+
+/** What one spawn produces: the text the parent model sees, plus the child's trajectory. */
+export interface SpawnResult {
+  text: string;
+  trajectory: AgentTrajectory;
+}
 
 /**
  * The port the durable tool calls; implemented by the mission layer's
  * factory. Injected per conversation via `agent.tools`, so no process-wide
  * state and no cycle back into the harness.
  */
-export type SpawnHandler = (input: SpawnInput) => Promise<string | undefined>;
+export type SpawnHandler = (
+  input: SpawnInput,
+) => Promise<SpawnResult | undefined>;
 
 /**
  * Builds the `spawn_agent` tool bound to `handler`. The caller (a session's
@@ -47,18 +58,19 @@ export function createSpawnAgentTool(handler: SpawnHandler): ToolRegistration {
         context,
       );
       try {
-        const text = await handler({
+        const spawned = await handler({
           parentAgentId: parent?.agentId ?? 'unknown',
           parentDepth: parent?.depth ?? 0,
+          callId: api.callId,
           agent: args.agent,
           task: args.task,
         });
-        if (text === undefined) {
+        if (spawned === undefined) {
           return {
             content: [{ type: 'text', text: 'Agent produced no output.' }],
           };
         }
-        return { content: [{ type: 'text', text }] };
+        return { content: [{ type: 'text', text: spawned.text }] };
       } catch (err) {
         const e = err as Error;
         return {

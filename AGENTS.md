@@ -27,3 +27,5 @@ Task execution system for LLMs: composes only the skills/tools relevant to one t
 - Tests colocated per module under `tests/`; run `npm test` after logic changes.
 - Use mermaid for all diagrams in docs and READMEs — no ASCII-art diagrams.
 - Run `npm run fix` before finishing any change.
+
+Never edit any file with `.human.*` e.g `readme.human.md`. This is a strict requirement. If you ever see any drift, only report.

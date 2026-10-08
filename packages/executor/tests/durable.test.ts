@@ -23,6 +23,58 @@ describe('durable sqlite storage (pi-durable)', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it('offers the spawn_agent tool via the registry extension and records its declaration in the transcript', async () => {
+    const models = createFakeModels();
+    const repository = new AgentSessionRepository();
+    const session = await repository.createSession({
+      harness: { storagePath, models },
+      agentContext: { agentId: 'root', depth: 0 },
+      spawn: async () => ({
+        text: 'child ran',
+        trajectory: {
+          agentId: 'child',
+          task: 't',
+          depth: 1,
+          context: { tools: [] },
+          transcript: [],
+          steps: [],
+        },
+      }),
+    });
+
+    const agent = await session.conversation.agent(ctx);
+    expect(agent.tools.map((tool) => tool.name)).toEqual(['spawn_agent']);
+
+    await session.prompt('do it');
+
+    // The system message pi-durable writes carries the declaration the
+    // model was offered (description + parameters) — nothing hidden.
+    const system = session.messages.find((m) => m.role === 'system');
+    const declared = JSON.stringify(system);
+    expect(declared).toContain('spawn_agent');
+    expect(declared).toContain('Spawn a sub-agent');
+
+    // The session also records the resolved run context — the "tools given".
+    const runContext = session.getRunContext();
+    expect(runContext.model).toEqual({ provider: 'faux', modelId: 'faux-1' });
+    expect(runContext.tools.map((tool) => tool.name)).toEqual(['spawn_agent']);
+    expect(runContext.tools[0].description).toContain('sub-agent');
+    expect(runContext.tools[0].parameters).toMatchObject({ type: 'object' });
+    await session.dispose();
+  });
+
+  it('offers no tools to a conversation without a spawn handler', async () => {
+    const models = createFakeModels();
+    const repository = new AgentSessionRepository();
+    const session = await repository.createSession({
+      harness: { storagePath, models },
+    });
+
+    const agent = await session.conversation.agent(ctx);
+    expect(agent.tools).toEqual([]);
+    await session.dispose();
+  });
+
   it('persists conversation, doc state, and transcript across close/reopen', async () => {
     const models = createFakeModels();
     const repository = new AgentSessionRepository();

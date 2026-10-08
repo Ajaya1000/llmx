@@ -19,8 +19,6 @@ export interface MissionManagerOptions {
   cwd?: string;
   agentsDir?: string;
   uiType: MissionUIType;
-  /** Pre-built UI override; replaces the uiType-built one (e.g. a recording wrapper). */
-  ui?: MissionUi;
   mission: Mission;
 }
 
@@ -42,10 +40,9 @@ export class MissionManager {
     this.mission = options.mission;
     this.uiType = options.uiType;
     this.ui =
-      options.ui ??
-      (options.uiType === MissionUIType.TUI
+      options.uiType === MissionUIType.TUI
         ? new TuiMissionUi()
-        : new LogMissionUi());
+        : new LogMissionUi();
     this.repository = new AgentSessionRepository();
   }
 
@@ -80,6 +77,7 @@ export class MissionManager {
       return {
         goal: this.mission.goal,
         result,
+        trajectory: result.trajectory,
       };
     } finally {
       await closeDurableHarness();

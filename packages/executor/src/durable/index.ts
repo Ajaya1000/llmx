@@ -5,6 +5,7 @@ import {
   ctx,
   type DurableHarnessConfig,
   getDurableHarness,
+  installSpawnTool,
 } from './durable-harness.js';
 import { DurableAgentSession } from './durable-session.js';
 import { resolveAgentModel } from './model-resolution.js';
@@ -47,17 +48,23 @@ export class AgentSessionRepository {
       params.harness?.models ?? (await createBuiltinModels()),
     );
 
+    // pi-durable offers tools through registry extensions — the conversation's
+    // `agent.tools` only FILTERS those. Without the install, the filter matches
+    // nothing and the model is offered no tools at all.
+    const spawnTool = params.spawn
+      ? createSpawnAgentTool(params.spawn)
+      : undefined;
+    if (spawnTool) await installSpawnTool(spawnTool);
+
     const conversationOption: ConversationCreateOptions = {
       ownership: { kind: 'ownerless' },
       agent: {
         model: { provider: model.provider, modelId: model.id },
-        // Leaf agents (depth == maxSpawnDepth) must not even see spawn_agent;
-        // the tool is injected per conversation only when `spawn` is provided,
-        // so the empty list removes it entirely.
         ...(params.cwd ? { cwd: params.cwd } : {}),
-        ...(params.spawn
-          ? { tools: [createSpawnAgentTool(params.spawn)] }
-          : {}),
+        // An array offers exactly these extension-provided tools; an empty
+        // list offers none — leaf agents (and conversations without a spawn
+        // handler) must not even see spawn_agent.
+        tools: spawnTool ? [spawnTool] : [],
       },
       init: async (tx, conversationId) => {
         if (!params.agentContext) return;
