@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { Evolution } from '../src/runtime.ts';
 import { InMemoryContextStore } from '../src/store/context-store.ts';
-import { InMemoryTrajectoryStore } from '../src/store/trajectory.ts';
+import { InMemoryWikiPersistence } from '../src/store/wiki-persistence.ts';
+import type { Trajectory } from '../src/trajectory.ts';
 import type {
   DistilledEntry,
+  DistilledRun,
   Judger,
-  Run,
 } from '../src/trajectory-distiller.ts';
-import type { Ref, TaskEvent, TranscriptRecord } from '../src/types.ts';
+import type { Ref } from '../src/types.ts';
 import type { RunRunner } from '../src/verifier.ts';
+import type { WikiAgent } from '../src/wiki-distiller.ts';
 
 /** The authoritative context artifacts the client owns (read & write). */
 function contextStore(): InMemoryContextStore {
@@ -34,72 +36,71 @@ function contextStore(): InMemoryContextStore {
   ]);
 }
 
-/** A trajectory with one failing run: agent:writer used skill:review. */
-function failingTrajectory(): InMemoryTrajectoryStore {
-  const trajectory = new InMemoryTrajectoryStore();
-  const task: TaskEvent = {
-    id: 'task:run-1',
-    kind: 'agent_run',
-    producer: 'root',
-    contextsUsed: [
-      { contextId: 'agent:writer', version: '0', recordRef: 'rec:writer' },
-      { contextId: 'skill:review', version: '0', recordRef: 'rec:review' },
-      { contextId: 'agent:editor', version: '0', recordRef: 'rec:editor' },
+/** One recorded run: the writer agent produced a wrong fact. */
+function writerRun(fact = 'the earth is flat'): Trajectory {
+  return {
+    agentId: 'agent:writer',
+    task: 'write the report',
+    depth: 0,
+    context: { instructions: 'You are a careful writer.', tools: [] },
+    steps: [
+      { role: 'system', content: 'You are a careful writer.' },
+      { role: 'user', content: 'write it' },
+      { type: 'text', text: fact },
     ],
-    // "from used to" = from depends on to: writer uses review, editor uses writer.
-    contextEdges: [
-      { from: 'agent:writer', to: 'skill:review' },
-      { from: 'agent:editor', to: 'agent:writer' },
-    ],
-    inputRefs: [],
-    outputRefs: [],
-    status: 'done',
   };
-  trajectory.onTask(task);
-  const records: TranscriptRecord[] = [
-    {
-      id: 'rec:writer',
-      taskId: task.id,
-      role: 'context_injection',
-      content: 'You are a careful writer.',
-      contextId: 'agent:writer',
-    },
-    {
-      id: 'rec:review',
-      taskId: task.id,
-      role: 'context_injection',
-      content: 'Review every claim.',
-      contextId: 'skill:review',
-    },
-    {
-      id: 'rec:editor',
-      taskId: task.id,
-      role: 'context_injection',
-      content: 'You are a careful editor.',
-      contextId: 'agent:editor',
-    },
-    {
-      id: 'rec:bad',
-      taskId: task.id,
-      role: 'assistant',
-      content: 'the earth is flat',
-    },
-  ];
-  for (const record of records) trajectory.record(record);
-  return trajectory;
 }
 
-/** Judges every run as one failure blamed on agent:writer. */
-const judger: Judger = {
-  async distill(_run: Run): Promise<DistilledEntry[]> {
-    return [
+/** One recorded run: the editor agent produced a wrong fact (continuation). */
+function editorRun(): Trajectory {
+  return {
+    agentId: 'agent:editor',
+    task: 'edit the report',
+    depth: 0,
+    context: { instructions: 'You are a careful editor.', tools: [] },
+    steps: [
+      { role: 'system', content: 'You are a careful editor.' },
+      { role: 'user', content: 'edit it' },
+      { type: 'text', text: 'the earth is flat again' },
+    ],
+  };
+}
+
+/** Observes the run view as one failure blamed on the run's own agent. */
+function judger(culprit: Ref): Judger {
+  return {
+    distill: async (view) => [
       {
         kind: 'failure',
         polarity: 'negative',
-        content: 'the earth is flat',
-        culprit: { role: 'introducer', kind: 'agent', ref: 'agent:writer' },
-      },
-    ];
+        content:
+          view.steps.map((s) => s.text).find((t) => t.includes('flat')) ??
+          'the earth is flat',
+        culprit: { role: 'introducer', kind: 'agent', ref: culprit },
+      } satisfies DistilledEntry,
+    ],
+  };
+}
+
+/** The wiki agent: restructures each response's entries into rows. */
+const wikiAgent: WikiAgent = {
+  distill: async (responses) => {
+    const now = Date.now();
+    return responses.flatMap((response: DistilledRun) =>
+      response.entries.map((entry, i) => ({
+        id: `${response.view.runId}:${i}`,
+        runId: response.view.runId,
+        kind: entry.kind,
+        polarity: entry.polarity,
+        author: { kind: 'agent', agentId: response.view.runId },
+        refs: { stepRef: entry.stepRef },
+        culprit: entry.culprit,
+        content: entry.content,
+        useCount: 0,
+        lastUsedAt: now,
+        createdAt: now,
+      })),
+    );
   },
 };
 
@@ -109,35 +110,34 @@ const passRunner: RunRunner = {
 
 describe('Evolution (composition root)', () => {
   it('never proposes a patch for mentioned source code paths', async () => {
-    // The culprit is a rendered source file, mentioned by the client.
-    const trajectory = failingTrajectory();
-    const sourceJudger: Judger = {
-      distill: (_run: Run) => [
-        {
-          kind: 'failure',
-          polarity: 'negative',
-          content: 'the earth is flat',
-          culprit: {
-            role: 'introducer',
-            kind: 'agent',
-            ref: 'src/tools/grep.ts',
-          },
-        },
-      ],
-    };
     const result = await new Evolution({
       contexts: contextStore(),
-      trajectory,
-      judger: sourceJudger,
+      trajectory: writerRun(),
+      judger: judger('src/tools/grep.ts'),
+      wikiAgent,
       runner: passRunner,
       decide: () => 'approved',
       sourcePaths: ['src/tools'],
     }).run();
 
-    // The failure is judged and kept as wiki knowledge, but nothing is
-    // proposed, validated, or approved for source code.
+    // The failure is kept as wiki knowledge, but nothing is proposed,
+    // validated, or approved for source code.
     expect(result.verdicts).toHaveLength(0);
     expect(result.approved).toHaveLength(0);
+  });
+
+  it('a mentioned source directory excludes everything under it', async () => {
+    const result = await new Evolution({
+      contexts: contextStore(),
+      trajectory: writerRun(),
+      judger: judger('src/tools/nested/deep/grep.ts'),
+      wikiAgent,
+      runner: passRunner,
+      decide: () => 'approved',
+      sourcePaths: ['src'],
+    }).run();
+
+    expect(result.verdicts).toHaveLength(0);
   });
 
   it('drives the full loop from a bare trajectory to an approved patch', async () => {
@@ -154,8 +154,9 @@ describe('Evolution (composition root)', () => {
 
     const result = await new Evolution({
       contexts: contextStore(),
-      trajectory: failingTrajectory(),
-      judger,
+      trajectory: writerRun(),
+      judger: judger('agent:writer'),
+      wikiAgent,
       runner,
       decide: () => 'approved',
       applier: (context, _patch) => ({
@@ -172,100 +173,103 @@ describe('Evolution (composition root)', () => {
     expect(seen).toContain('agent:writer');
   });
 
-  it('derives the context graph from the trajectory (dependents = blast radius)', async () => {
-    const runner: RunRunner = {
-      run: () => ({ pass: true, evidenceRefs: [] }),
-    };
+  it('derives the context graph from the store (dependents = blast radius)', async () => {
     const result = await new Evolution({
       contexts: contextStore(),
-      trajectory: failingTrajectory(),
-      judger,
-      runner,
+      trajectory: writerRun(),
+      judger: judger('agent:writer'),
+      wikiAgent,
+      runner: passRunner,
       decide: () => 'approved',
     }).run();
 
-    // agent:editor used agent:writer (edge from→to = from depends on to),
-    // so it lands in the patch's affected set — the re-validate blast
-    // radius, derived from the trajectory's contextEdges alone.
+    // agent:editor depends on agent:writer (store definition), so it lands
+    // in the patch's affected set — the re-validate blast radius.
     expect(result.approved[0]?.patch.affected).toContain('agent:editor');
   });
 
   it('rejects everything when no human gate is provided (default)', async () => {
     const result = await new Evolution({
       contexts: contextStore(),
-      trajectory: failingTrajectory(),
-      judger,
+      trajectory: writerRun(),
+      judger: judger('agent:writer'),
+      wikiAgent,
       runner: passRunner,
     }).run();
 
     expect(result.approved).toHaveLength(0);
   });
 
-  it('a mentioned source directory excludes everything under it', async () => {
-    const trajectory = failingTrajectory();
-    const sourceJudger: Judger = {
-      distill: (_run: Run) => [
-        {
-          kind: 'failure',
-          polarity: 'negative',
-          content: 'the earth is flat',
-          culprit: {
-            role: 'introducer',
-            kind: 'agent',
-            ref: 'src/tools/nested/deep/grep.ts',
-          },
-        },
-      ],
-    };
-    const result = await new Evolution({
-      contexts: contextStore(),
-      trajectory,
-      judger: sourceJudger,
-      runner: passRunner,
-      decide: () => 'approved',
-      sourcePaths: ['src'],
-    }).run();
-
-    expect(result.verdicts).toHaveLength(0);
-  });
-
-  it('maintain() judges each run exactly once (offline: wiki kept current)', async () => {
-    let judged = 0;
+  it('maintain() distills the run exactly once (idempotent)', async () => {
+    let observed = 0;
     const countingJudger: Judger = {
-      distill: async (run: Run) => {
-        judged += 1;
-        return judger.distill(run);
+      distill: async (view) => {
+        observed += 1;
+        return judger('agent:writer').distill(view);
       },
     };
-    const trajectory = failingTrajectory();
     const evolution = new Evolution({
       contexts: contextStore(),
-      trajectory,
+      trajectory: writerRun(),
       judger: countingJudger,
+      wikiAgent,
       runner: passRunner,
     });
 
     await evolution.maintain();
-    await evolution.maintain(); // no new runs → no new judging
-    expect(judged).toBe(1);
+    await evolution.maintain(); // no-op: the run is already distilled
+    expect(observed).toBe(1);
+  });
 
-    // A second run lands: only it gets judged.
-    const [firstRun] = trajectory.runs();
-    trajectory.onTask({
-      ...firstRun,
-      id: 'task:run-2',
-      contextsUsed: [],
-      contextEdges: [],
+  it('two failures on one context each keep their own eval pass', async () => {
+    // The judger reports two distinct failures, both blamed on agent:writer.
+    const twoFailures: Judger = {
+      distill: async (view) =>
+        ['the earth is flat', 'the moon is cheese'].map(
+          (content) =>
+            ({
+              kind: 'failure',
+              polarity: 'negative',
+              content,
+              culprit: {
+                role: 'introducer',
+                kind: 'agent',
+                ref: 'agent:writer',
+              },
+            }) satisfies DistilledEntry,
+        ),
+    };
+    const evolution = new Evolution({
+      contexts: contextStore(),
+      trajectory: writerRun(),
+      judger: twoFailures,
+      wikiAgent,
+      runner: passRunner,
+      decide: () => 'approved',
     });
-    await evolution.maintain();
-    expect(judged).toBe(2);
+
+    // Pass 1: both failures derive their evals, but the proposer emits one
+    // patch per context per pass — one verdict.
+    const first = await evolution.run();
+    expect(first.verdicts).toHaveLength(1);
+
+    // Pass 2: the second failure still hasn't had its pass — it gets its
+    // own proposal for the same context (its own eval set behind it).
+    const second = await evolution.run();
+    expect(second.verdicts).toHaveLength(1);
+    expect(second.verdicts[0]?.patch.contextId).toBe('agent:writer');
+
+    // Pass 3: both failures had their pass — nothing left to propose.
+    const third = await evolution.run();
+    expect(third.verdicts).toHaveLength(0);
   });
 
   it('run() is re-entrant: an earlier pass never re-proposes its culprit', async () => {
     const evolution = new Evolution({
       contexts: contextStore(),
-      trajectory: failingTrajectory(),
-      judger,
+      trajectory: writerRun(),
+      judger: judger('agent:writer'),
+      wikiAgent,
       runner: passRunner,
       decide: () => 'approved',
     });
@@ -279,7 +283,7 @@ describe('Evolution (composition root)', () => {
     expect(second.approved).toHaveLength(0);
   });
 
-  it('realtime: continuation runs re-sync contexts and evolve new culprits', async () => {
+  it('realtime: a continuation run evolves its own culprit over a shared wiki', async () => {
     const seenContent: string[] = [];
     const runner: RunRunner = {
       run: (_original, patched) => {
@@ -287,86 +291,50 @@ describe('Evolution (composition root)', () => {
         return { pass: true, evidenceRefs: [] };
       },
     };
-    // Judges by grounded fact: a "flat again" failure blames agent:editor,
-    // the original "flat" failure blames agent:writer.
-    const factJudger: Judger = {
-      distill: (run: Run): DistilledEntry[] => {
-        const texts = run.records.map((r) => r.content);
-        if (texts.some((c) => c.includes('flat again')))
-          return [
-            {
-              kind: 'failure',
-              polarity: 'negative',
-              content: 'the earth is flat again',
-              culprit: {
-                role: 'introducer',
-                kind: 'agent',
-                ref: 'agent:editor',
-              },
-            },
-          ];
-        return judger.distill(run);
-      },
-    };
-    const trajectory = failingTrajectory();
-    // One instance for the whole lifecycle.
-    const evolution = new Evolution({
+    // One wiki (persistence) across both runs — two instances, one per run.
+    const persistence = new InMemoryWikiPersistence();
+
+    // Pass 1: the writer's run — its culprit is patched and approved.
+    const first = await new Evolution({
       contexts: contextStore(),
-      trajectory,
-      judger: factJudger,
+      trajectory: writerRun(),
+      judger: judger('agent:writer'),
+      wikiAgent,
       runner,
       decide: () => 'approved',
-    });
-
-    // Pass 1 mid-task: the culprit context is patched and approved.
-    const first = await evolution.run();
+      persistence,
+    }).run();
     expect(first.approved[0]?.patch.contextId).toBe('agent:writer');
     expect(seenContent[0]).toContain('You are a careful writer.');
 
-    // The client applies the patch and the task continues with a new failing
-    // run that renders agent:editor.
-    const continuation: TaskEvent = {
-      id: 'task:run-2',
-      kind: 'agent_run',
-      producer: 'root',
-      contextsUsed: [
-        { contextId: 'agent:editor', version: '0', recordRef: 'rec:editor2' },
-      ],
-      contextEdges: [],
-      inputRefs: [],
-      outputRefs: [],
-      status: 'failed',
-    };
-    trajectory.onTask(continuation);
-    trajectory.record({
-      id: 'rec:editor2',
-      taskId: continuation.id,
-      role: 'context_injection',
-      content: 'You are a careful editor.',
-      contextId: 'agent:editor',
-    });
-    trajectory.record({
-      id: 'rec:bad2',
-      taskId: continuation.id,
-      role: 'assistant',
-      content: 'the earth is flat again',
-    });
-
-    // Pass 2 on the same instance: only agent:editor is proposed (writer
-    // already had its pass), and the forked run sees the editor's synced
-    // context content.
-    const second = await evolution.run();
-    expect(second.verdicts).toHaveLength(1);
-    expect(second.verdicts[0]?.patch.contextId).toBe('agent:editor');
-    expect(seenContent[1]).toContain('You are a careful editor.');
+    // Pass 2: the client applied the patch; the task continued with a new
+    // failing run by the editor. The shared wiki already holds the writer
+    // failure; the editor's culprit gets its own pass.
+    const second = await new Evolution({
+      contexts: contextStore(),
+      trajectory: editorRun(),
+      judger: judger('agent:editor'),
+      wikiAgent,
+      runner,
+      decide: () => 'approved',
+      persistence,
+    }).run();
+    expect(second.approved.map((a) => a.patch.contextId)).toContain(
+      'agent:editor',
+    );
+    // the forked validation saw the editor's synced context content
+    expect(
+      seenContent.some((c) => c.includes('You are a careful editor.')),
+    ).toBe(true);
   });
 
   it('writes gate-approved patches to the context store', async () => {
     const contexts = contextStore();
     const result = await new Evolution({
       contexts,
-      trajectory: failingTrajectory(),
-      judger,
+      trajectory: writerRun(),
+      judger: judger('agent:writer'),
+      wikiAgent,
       runner: passRunner,
       decide: () => 'approved',
       applier: (context, patch) => ({
@@ -382,66 +350,76 @@ describe('Evolution (composition root)', () => {
     expect(contexts.get('skill:review')?.content).toBe('Review every claim.');
   });
 
-  it('judges through the framework-owned prompt when only a model is given', async () => {
+  it('judges and wikifies through the framework prompts when only a model is given', async () => {
     const contexts = contextStore();
+    const model = {
+      complete: async (prompt: string) =>
+        prompt.includes('wiki agent')
+          ? // the wiki agent's structured rows
+            JSON.stringify([
+              {
+                kind: 'failure',
+                polarity: 'negative',
+                content: 'the earth is flat',
+                runId: 'agent:writer',
+                culprit: {
+                  role: 'introducer',
+                  kind: 'agent',
+                  ref: 'agent:writer',
+                },
+              },
+            ])
+          : // the judger's observations
+            JSON.stringify([
+              {
+                kind: 'failure',
+                polarity: 'negative',
+                content: 'the earth is flat',
+                culprit: {
+                  role: 'introducer',
+                  kind: 'agent',
+                  ref: 'agent:writer',
+                },
+              },
+            ]),
+    };
+
     const result = await new Evolution({
       contexts,
-      trajectory: failingTrajectory(),
-      model: {
-        complete: async () =>
-          JSON.stringify([
-            {
-              kind: 'failure',
-              polarity: 'negative',
-              content: 'the earth is flat',
-              culprit: {
-                role: 'introducer',
-                kind: 'agent',
-                ref: 'agent:writer',
-              },
-            },
-          ]),
-      },
+      trajectory: writerRun(),
+      model,
       runner: passRunner,
       decide: () => 'approved',
     }).run();
 
-    // No client judger — the framework prompt produced the judgment, and
-    // the approved patch was written to the store.
+    // No client overrides — the framework prompts produced the observation,
+    // the wiki agent structured it into a row, and the patch was written.
     expect(result.verdicts).toHaveLength(1);
+    expect(result.approved).toHaveLength(1);
     expect(contexts.get('agent:writer')?.content).toContain(
       'You are a careful writer.',
     );
-    expect(result.approved).toHaveLength(1);
   });
 
-  it('rejects construction without a model call or judger override', () => {
+  it('rejects construction without a model call or both overrides', () => {
     expect(
       () =>
         new Evolution({
           contexts: contextStore(),
-          trajectory: failingTrajectory(),
+          trajectory: writerRun(),
+          judger: judger('agent:writer'),
           runner: passRunner,
         } as never),
-    ).toThrow(/model call or a judger/);
+    ).toThrow(/model call or both/);
   });
 
   it('never proposes for a context the store does not own', async () => {
-    const ghostJudger: Judger = {
-      distill: (_run: Run) => [
-        {
-          kind: 'failure',
-          polarity: 'negative',
-          content: 'the earth is flat',
-          culprit: { role: 'introducer', kind: 'agent', ref: 'agent:ghost' },
-        },
-      ],
-    };
     const contexts = contextStore(); // no agent:ghost in the store
     const result = await new Evolution({
       contexts,
-      trajectory: failingTrajectory(),
-      judger: ghostJudger,
+      trajectory: writerRun(),
+      judger: judger('agent:ghost'),
+      wikiAgent,
       runner: passRunner,
       decide: () => 'approved',
     }).run();

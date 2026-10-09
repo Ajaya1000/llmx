@@ -4,19 +4,19 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DefaultPinpointer } from '../src/pinpoint.ts';
 import { InMemoryContextRegistry } from '../src/store/context-registry.ts';
-import { InMemoryTrajectoryStore } from '../src/store/trajectory.ts';
 import { DefaultWikiMaintainer } from '../src/store/wiki.ts';
 import {
   InMemoryWikiPersistence,
   SqliteWikiPersistence,
 } from '../src/store/wiki-persistence.ts';
+import type { Trajectory } from '../src/trajectory.ts';
 import type { WikiRow } from '../src/wiki-types.ts';
 
 function row(partial: Partial<WikiRow> & { id: string }): WikiRow {
   return {
-    missionId: 'm1',
+    runId: 'run-1',
     kind: 'failure',
-    author: { kind: 'task', taskId: 't1' },
+    author: { kind: 'agent', agentId: 'run-1' },
     refs: {},
     content: '',
     useCount: 0,
@@ -26,15 +26,20 @@ function row(partial: Partial<WikiRow> & { id: string }): WikiRow {
   };
 }
 
+/** An empty run — nothing to pinpoint. */
 function pinpointer(): DefaultPinpointer {
-  return new DefaultPinpointer(
-    new InMemoryTrajectoryStore(),
-    new InMemoryContextRegistry(),
-  );
+  const trajectory: Trajectory = {
+    agentId: 'none',
+    task: '',
+    depth: 0,
+    context: { tools: [] },
+    steps: [],
+  };
+  return new DefaultPinpointer(trajectory, new InMemoryContextRegistry());
 }
 
 describe('DefaultWikiMaintainer', () => {
-  it('records and re-loads through the persistence backend', () => {
+  it('records, exposes every row, and re-loads through persistence', () => {
     const persistence = new InMemoryWikiPersistence();
     const wiki = new DefaultWikiMaintainer(pinpointer(), persistence);
 
@@ -42,6 +47,8 @@ describe('DefaultWikiMaintainer', () => {
     wiki.record(row({ id: 'r2', kind: 'failure', lastUsedAt: 0 }));
     wiki.record(row({ id: 'r3', kind: 'failure', lastUsedAt: Date.now() }));
 
+    // every held row — the prior knowledge the wiki agent searches across
+    expect(wiki.rows().map((r) => r.id)).toEqual(['r1', 'r2', 'r3']);
     // failures only, retention-ranked (r3 most recently used → first)
     expect(wiki.prioritizedFailures().map((r) => r.id)).toEqual(['r3', 'r2']);
 
@@ -52,30 +59,19 @@ describe('DefaultWikiMaintainer', () => {
     ]);
   });
 
-  it('pinpoint delegates to the pinpointer', () => {
-    const trajectory = new InMemoryTrajectoryStore();
-    trajectory.onTask({
-      id: 't1',
-      kind: 'agent_run',
-      producer: 'agent-a',
-      contextsUsed: [],
-      contextEdges: [],
-      inputRefs: [],
-      outputRefs: ['r1'],
-      status: 'done',
-    });
-    trajectory.record({
-      id: 'r1',
-      taskId: 't1',
-      role: 'assistant',
-      content: 'the fact X appears here',
-    });
-
+  it('pinpoint delegates to the pinpointer over the run trajectory', () => {
+    const trajectory: Trajectory = {
+      agentId: 'agent-a',
+      task: 't',
+      depth: 0,
+      context: { tools: [] },
+      steps: [{ type: 'text', text: 'the fact X appears here' }],
+    };
     const wiki = new DefaultWikiMaintainer(
       new DefaultPinpointer(trajectory, new InMemoryContextRegistry()),
       new InMemoryWikiPersistence(),
     );
-    expect(wiki.pinpoint('X')?.culprit.id).toBe('t1');
+    expect(wiki.pinpoint('X')?.culprit).toBe('agent-a');
   });
 
   it('sqlite persistence round-trips and evicts', async () => {

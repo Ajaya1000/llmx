@@ -1,4 +1,10 @@
-import type { Context, ContextEdge, Ref } from '../types.ts';
+import type { Context, Ref } from '../types.ts';
+
+/** Runtime usage edge: context `from` used context `to` (from depends on to). */
+export interface UsageEdge {
+  from: Ref;
+  to: Ref;
+}
 
 /**
  * The context dependency graph — every improvable artifact (tool / skill /
@@ -14,7 +20,7 @@ export interface ContextRegistry {
   all(): Context[];
 }
 
-/** In-memory context graph over `Context.dependsOn` + observed `ContextEdge`s. */
+/** In-memory context graph over `Context.dependsOn` + observed usage edges. */
 export class InMemoryContextRegistry implements ContextRegistry {
   private contexts = new Map<Ref, Context>();
   /** from → to ("from depends on to"). */
@@ -28,8 +34,8 @@ export class InMemoryContextRegistry implements ContextRegistry {
     for (const dep of context.dependsOn) this.addEdge(context.id, dep);
   }
 
-  /** Record runtime usage edges (e.g. `TaskEvent.contextEdges`). */
-  observe(edges: ContextEdge[]): void {
+  /** Record runtime usage edges (e.g. an agent run using a tool). */
+  observe(edges: readonly UsageEdge[]): void {
     for (const edge of edges) this.addEdge(edge.from, edge.to);
   }
 

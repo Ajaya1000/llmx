@@ -1,90 +1,143 @@
 import { describe, expect, it } from 'vitest';
-import { InMemoryTrajectoryStore } from '../src/store/trajectory.ts';
+import type { Trajectory } from '../src/trajectory.ts';
 import {
+  buildRunView,
   DefaultTrajectoryDistiller,
   type DistilledEntry,
   type Judger,
   PromptedJudger,
-  type Run,
+  type RunView,
 } from '../src/trajectory-distiller.ts';
-import type { TaskEvent, TranscriptRecord } from '../src/types.ts';
 
-function task(partial: Partial<TaskEvent> & { id: string }): TaskEvent {
+/** One run: root spawns a child that calls a tool; the root adds a tool mid-run. */
+function trajectory(): Trajectory {
   return {
-    kind: 'agent_run',
-    producer: 'agent-a',
-    contextsUsed: [],
-    contextEdges: [],
-    inputRefs: [],
-    outputRefs: [],
-    status: 'done',
-    ...partial,
+    agentId: 'agent-a',
+    task: 'root task',
+    depth: 0,
+    context: {
+      instructions: 'You are the root agent.',
+      tools: [{ name: 'read', description: 'reads files', parameters: {} }],
+    },
+    steps: [
+      { role: 'system', content: 'You are the root agent.' },
+      { role: 'user', content: 'go' },
+      {
+        role: 'system',
+        content: '',
+        toolsAdded: [
+          { name: 'spawn', description: 'spawns agents', parameters: {} },
+        ],
+      },
+      {
+        type: 'toolCall',
+        id: 'call-spawn',
+        name: 'spawn',
+        arguments: { task: 'child task' },
+        result: 'child finished',
+        isError: false,
+        child: {
+          agentId: 'agent-b',
+          task: 'child task',
+          depth: 1,
+          context: { instructions: 'You are the child agent.', tools: [] },
+          steps: [
+            { role: 'user', content: 'check' },
+            {
+              type: 'toolCall',
+              id: 'call-tool',
+              name: 'tool-y',
+              arguments: { q: 1 },
+              result: 'the wrong fact',
+              isError: false,
+            },
+          ],
+        },
+      },
+      { type: 'text', text: 'done' },
+    ],
   };
 }
 
-describe('DefaultTrajectoryDistiller', () => {
-  it('collects judger rows into the distilled log', async () => {
-    const store = new InMemoryTrajectoryStore();
-    store.onTask(task({ id: 'run1' }));
+describe('buildRunView (the traditional-code half)', () => {
+  it('keeps every step, renders contexts, and makes the implicit edges explicit', () => {
+    const view = buildRunView(trajectory());
 
-    const judger: Judger = {
-      distill: async (): Promise<DistilledEntry[]> => [
-        { kind: 'strategy', polarity: 'positive', content: 'do X' },
-      ],
-    };
-    const log = await new DefaultTrajectoryDistiller(judger).distill(store);
+    expect(view.runId).toBe('agent-a');
+    expect(view.steps.map((s) => s.ref)).toEqual([
+      'agent-a:0',
+      'agent-a:1',
+      'agent-a:2',
+      'call-spawn',
+      'agent-b:0',
+      'call-tool',
+      'agent-a:4',
+    ]);
+    expect(view.steps.map((s) => s.kind)).toEqual([
+      'system',
+      'user',
+      'system',
+      'tool',
+      'user',
+      'tool',
+      'text',
+    ]);
+    expect(view.steps[5]?.text).toBe('the wrong fact'); // lossless text
+    expect(view.steps[5]?.tool?.name).toBe('tool-y');
 
-    expect(log.rows).toHaveLength(1);
-    expect(log.rows[0].kind).toBe('strategy');
-    expect(log.rows[0].refs.taskId).toBe('run1');
-  });
-
-  it('assembles a run with subtree tasks and transcript records', async () => {
-    const store = new InMemoryTrajectoryStore();
-    store.onTask(task({ id: 'run1' }));
-    store.onTask(task({ id: 'tool1', parentId: 'run1', kind: 'tool_call' }));
-    store.record({
-      id: 'r1',
-      taskId: 'tool1',
-      role: 'tool_result',
-      content: 'x',
+    expect(view.contexts.map((c) => c.id)).toEqual([
+      'agent-a',
+      'tool:read',
+      'tool:spawn',
+      'agent-b',
+    ]);
+    expect(view.edges).toContainEqual({
+      from: 'call-spawn',
+      to: 'agent-b',
+      kind: 'spawned',
     });
-    store.record({ id: 'r2', taskId: 'run1', role: 'assistant', content: 'y' });
-
-    let captured: Run | undefined;
-    const judger: Judger = {
-      distill: async (run) => {
-        captured = run;
-        return [];
-      },
-    };
-    await new DefaultTrajectoryDistiller(judger).distill(store);
-
-    expect(captured?.root.id).toBe('run1');
-    expect(captured?.tasks.map((t) => t.id)).toEqual(['tool1']);
-    expect(captured?.records.map((r) => r.id).sort()).toEqual(['r1', 'r2']);
+    expect(view.edges).toContainEqual({
+      from: 'agent-a',
+      to: 'tool:read',
+      kind: 'used',
+    });
+    expect(view.edges).toContainEqual({
+      from: 'agent-a',
+      to: 'tool:spawn', // mid-run addition, still an edge
+      kind: 'used',
+    });
   });
 });
 
-describe('PromptedJudger (framework-owned judging prompt)', () => {
-  const model = (reply: () => string) => ({ complete: async () => reply() });
-
-  function run(records: TranscriptRecord[], contextIds: string[]): Run {
-    return {
-      root: task({ id: 'run1' }),
-      tasks: [
-        task({
-          id: 'run1',
-          contextsUsed: contextIds.map((contextId) => ({
-            contextId,
-            version: '0',
-            recordRef: 'r',
-          })),
-        }),
-      ],
-      records,
+describe('DefaultTrajectoryDistiller', () => {
+  it("pairs the built view with the judger's observations", async () => {
+    let seen: RunView | undefined;
+    const judger: Judger = {
+      distill: async (view) => {
+        seen = view;
+        return [
+          {
+            kind: 'failure',
+            polarity: 'negative',
+            content: 'the wrong fact',
+            culprit: { role: 'introducer', kind: 'tool', ref: 'tool:tool-y' },
+            stepRef: 'call-tool',
+          },
+        ] satisfies DistilledEntry[];
+      },
     };
-  }
+
+    const run = await new DefaultTrajectoryDistiller(judger).distill(
+      trajectory(),
+    );
+
+    expect(run.view).toBe(seen);
+    expect(run.entries[0]?.stepRef).toBe('call-tool');
+  });
+});
+
+describe('PromptedJudger (framework-owned observing prompt)', () => {
+  const model = (reply: () => string) => ({ complete: async () => reply() });
 
   it('sends the framework prompt and parses the model reply', async () => {
     let seenPrompt = '';
@@ -96,31 +149,28 @@ describe('PromptedJudger (framework-owned judging prompt)', () => {
             kind: 'failure',
             polarity: 'negative',
             content: 'the earth is flat',
-            culprit: {
-              role: 'introducer',
-              kind: 'agent',
-              ref: 'agent:writer',
-            },
+            culprit: { role: 'introducer', kind: 'agent', ref: 'agent:writer' },
           },
         ]);
       },
     });
 
-    const entries = await judger.distill(
-      run(
-        [
-          {
-            id: 'r1',
-            taskId: 'run1',
-            role: 'assistant',
-            content: 'the earth is flat',
-          },
-        ],
-        ['agent:writer'],
-      ),
-    );
+    const entries = await judger.distill({
+      runId: 'agent:writer',
+      task: 't',
+      contexts: [{ id: 'agent:writer', kind: 'agent', content: 'write' }],
+      steps: [
+        {
+          ref: 'agent:writer:0',
+          agentId: 'agent:writer',
+          kind: 'text',
+          text: 'the earth is flat',
+        },
+      ],
+      edges: [],
+    });
 
-    // The prompt is framework-built: grounded rules + rendered contexts + transcript.
+    // The prompt is framework-built: grounded rules + contexts + steps.
     expect(seenPrompt).toContain('never invent facts');
     expect(seenPrompt).toContain('agent:writer');
     expect(seenPrompt).toContain('the earth is flat');
@@ -130,7 +180,7 @@ describe('PromptedJudger (framework-owned judging prompt)', () => {
     expect(entries[0]?.culprit?.ref).toBe('agent:writer');
   });
 
-  it('strips culprit refs the run never rendered and invalid rows', async () => {
+  it('strips culprit refs and step refs the view never rendered', async () => {
     const judger = new PromptedJudger(
       model(() =>
         JSON.stringify([
@@ -138,6 +188,7 @@ describe('PromptedJudger (framework-owned judging prompt)', () => {
             kind: 'failure',
             content: 'grounded fact',
             culprit: { role: 'introducer', kind: 'agent', ref: 'agent:ghost' },
+            stepRef: 'agent:ghost:9',
           },
           { kind: 'nonsense', content: 'dropped' },
           { kind: 'lesson', content: 'kept, no culprit' },
@@ -145,22 +196,24 @@ describe('PromptedJudger (framework-owned judging prompt)', () => {
       ),
     );
 
-    const entries = await judger.distill(
-      run(
-        [
-          {
-            id: 'r1',
-            taskId: 'run1',
-            role: 'assistant',
-            content: 'grounded fact',
-          },
-        ],
-        ['agent:writer'],
-      ),
-    );
+    const entries = await judger.distill({
+      runId: 'agent:writer',
+      task: 't',
+      contexts: [{ id: 'agent:writer', kind: 'agent', content: 'write' }],
+      steps: [
+        {
+          ref: 'agent:writer:0',
+          agentId: 'agent:writer',
+          kind: 'text',
+          text: 'grounded fact',
+        },
+      ],
+      edges: [],
+    });
 
     expect(entries).toHaveLength(2);
     expect(entries[0]?.culprit).toBeUndefined(); // ghost ref stripped
+    expect(entries[0]?.stepRef).toBeUndefined(); // unknown step stripped
     expect(entries[1]?.kind).toBe('lesson');
   });
 
@@ -169,12 +222,13 @@ describe('PromptedJudger (framework-owned judging prompt)', () => {
       model(() => 'I think this run was fine.'),
     );
     await expect(
-      judger.distill(
-        run(
-          [{ id: 'r1', taskId: 'run1', role: 'assistant', content: 'x' }],
-          [],
-        ),
-      ),
+      judger.distill({
+        runId: 'r',
+        task: 't',
+        contexts: [],
+        steps: [],
+        edges: [],
+      }),
     ).rejects.toThrow(/JSON array/);
   });
 });

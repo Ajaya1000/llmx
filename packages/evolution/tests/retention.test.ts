@@ -4,9 +4,9 @@ import type { WikiRow } from '../src/wiki-types.ts';
 
 function row(partial: Partial<WikiRow> & { id: string }): WikiRow {
   return {
-    missionId: 'm1',
+    runId: 'm1',
     kind: 'failure',
-    author: { kind: 'task', taskId: 't1' },
+    author: { kind: 'agent', agentId: 't1' },
     refs: {},
     content: '',
     useCount: 0,

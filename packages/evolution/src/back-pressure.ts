@@ -13,9 +13,9 @@ export class DefaultBackPressure implements BackPressure {
   push(blamedRef: Ref, correction: Ref, author: Author): WikiRow {
     const now = Date.now();
     return {
-      // ponytail: missionId is '' until back-pressure is wired to a mission.
+      // ponytail: runId is '' until back-pressure is wired to a run.
       id: `bp:${blamedRef}:${correction}`,
-      missionId: '',
+      runId: '',
       kind: 'back_pressure',
       author,
       refs: { blamedRef, correctionRef: correction },

@@ -21,12 +21,11 @@ export class DefaultVerifierDistiller implements VerifierDistiller {
     const pass = verdict.pass;
     return {
       id: `verdict:${patch.contextId}:${i}`,
-      // ponytail: evolution verdicts link to a mission when the runtime wires them.
-      missionId: '',
+      // ponytail: verdict rows link to their validation run once the runner reports one.
+      runId: '',
       kind: pass ? 'strategy' : 'failure',
       polarity: pass ? 'positive' : 'negative',
-      // ponytail: real validation-task id once the validator is a recorded task.
-      author: { kind: 'task', taskId: 'validator' },
+      author: { kind: 'agent', agentId: 'validator' },
       refs: {},
       culprit: {
         role: 'introducer',

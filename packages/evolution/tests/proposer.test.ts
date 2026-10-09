@@ -11,10 +11,10 @@ function ctx(id: string, kind: ContextKind, dependsOn: string[] = []): Context {
 function failure(culprit: Culprit): WikiRow {
   return {
     id: 'f1',
-    missionId: 'm1',
+    runId: 'm1',
     kind: 'failure',
     polarity: 'negative',
-    author: { kind: 'task', taskId: 't1' },
+    author: { kind: 'agent', agentId: 't1' },
     refs: {},
     culprit,
     content: 'tool-x is wrong',

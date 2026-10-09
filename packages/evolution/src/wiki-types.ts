@@ -1,11 +1,5 @@
-import type {
-  Author,
-  ContextKind,
-  Ref,
-  Role,
-  TaskEvent,
-  TranscriptRole,
-} from './types.ts';
+import type { StepKind } from './trajectory.ts';
+import type { Author, ContextKind, Ref, Role } from './types.ts';
 
 /** What a wiki row records. */
 export type WikiRowKind =
@@ -45,16 +39,18 @@ export interface ContextPatch {
  */
 export interface WikiRow {
   id: string;
-  missionId: string;
+  /** The run this row was distilled from (its root agent id). */
+  runId: Ref;
   kind: WikiRowKind;
   /** What the sample showed — on strategy/failure rows. */
   polarity?: 'positive' | 'negative';
-  /** Human vs. ancestor agent (blame must distinguish the two). */
+  /** Human vs. the agent run that lived it (blame must distinguish the two). */
   author: Author;
   refs: {
     blamedRef?: Ref;
     correctionRef?: Ref;
-    taskId?: Ref;
+    /** The trajectory step the row grounds on, when one is named. */
+    stepRef?: Ref;
   };
   /** Ownership walk, materialized by pinpointing. */
   blameChain?: Ref[];
@@ -70,11 +66,12 @@ export interface WikiRow {
 
 /** Provenance-only first-introduction result — no context graph involved. */
 export interface Introduction {
-  culprit: TaskEvent;
+  /** The run (agent id) that first carried the fact. */
+  culprit: Ref;
   role: Role;
-  /** The record that first carried the fact — drives tool/context descent. */
-  introducedBy?: { recordId: Ref; role: TranscriptRole; contextId?: Ref };
-  /** Tasks that reused the fact downstream (after the introducer). */
+  /** The step that first carried the fact — drives tool/context descent. */
+  introducedBy?: { stepRef: Ref; kind: StepKind; contextId?: Ref };
+  /** Runs that reused the fact downstream (after the introducer). */
   propagators: Ref[];
 }
 
@@ -84,9 +81,9 @@ export interface Blame extends Introduction {
   culpritKind?: ContextKind;
   /** The context id at fault (tool / skill / agent). */
   culpritContextId?: Ref;
-  /** Ownership chain upward from the culprit task. */
+  /** Ownership chain upward from the culprit run (agent ids, nearest first). */
   ancestors: Ref[];
-  /** Validation/evaluation tasks that saw the fact and passed. */
+  /** Tools that relayed the fact onward without flagging an error. */
   missedDetectors: Ref[];
   /** Transitive context dependents — the re-validate blast radius. */
   dependents: Ref[];
@@ -98,8 +95,8 @@ export interface FailureLocation {
   fact: string;
   /** Compact culprit: what to patch. */
   culprit: Culprit;
-  /** The record that first carried the fact. */
-  introducedBy?: { recordId: Ref; role: TranscriptRole; contextId?: Ref };
+  /** The step that first carried the fact. */
+  introducedBy?: { stepRef: Ref; kind: StepKind; contextId?: Ref };
   propagators: Ref[];
   ancestors: Ref[];
   missedDetectors: Ref[];

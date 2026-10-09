@@ -11,9 +11,9 @@ import type { ContextPatch, Verdict, WikiRow } from '../src/wiki-types.ts';
 
 const failure: WikiRow = {
   id: 'f1',
-  missionId: 'm1',
+  runId: 'm1',
   kind: 'failure',
-  author: 'task',
+  author: { kind: 'agent', agentId: 't1' },
   refs: {},
   content: 'wrong output',
   culprit: { role: 'introducer', kind: 'tool', ref: 'tool-a' },

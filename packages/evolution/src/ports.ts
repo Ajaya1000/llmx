@@ -1,5 +1,5 @@
-import type { Context, Ref, TaskEvent, TranscriptRecord } from './types.ts';
-import type { Blame, Introduction, WikiRow } from './wiki-types.ts';
+import type { Context, Ref } from './types.ts';
+import type { Blame, WikiRow } from './wiki-types.ts';
 
 /**
  * The seams of the evolution framework. Everything depends on these, nothing
@@ -35,24 +35,6 @@ export interface ContextStore {
  */
 export interface ModelCall {
   complete(prompt: string): Promise<string>;
-}
-
-/** The only write into the trajectory — emitted for every task. */
-export interface TaskObserver {
-  onTask(event: TaskEvent): void;
-}
-
-/** Provenance reads over the recorded tasks. */
-export interface TrajectoryQuery {
-  inputs(ref: Ref): Ref[];
-  children(taskId: Ref): TaskEvent[];
-  ancestors(ref: Ref): Ref[];
-  /** First record whose content contains `fact` (earliest by insertion order). */
-  firstIntroduction(fact: string): Introduction | null;
-  /** Top-level tasks — one per run. */
-  runs(): TaskEvent[];
-  /** All transcript records. */
-  records(): TranscriptRecord[];
 }
 
 /** The wiki — curated, time-framed, bounded store of distilled judgments. */

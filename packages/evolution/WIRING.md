@@ -2,30 +2,37 @@
 
 The integration philosophy, in one breath:
 
-> **The client provides the trajectory (usage), the context store
-> (definitions, read & write), and a raw model call. Evolution derives what
-> was used and when from the trajectory, owns every prompt (including
-> judging), wires itself in one place, and drives on its own.**
+> **The client provides one recorded run — its trajectory (the step tree,
+> whatever shape its executor produced), the context store (definitions, read
+> & write), and a raw model call. Evolution distills the trajectory (an LLM
+> plus traditional code) into a smaller lossless view with explicit edges,
+> the wiki agent (another LLM) turns every response into structured rows,
+> and the wiki — persisted across runs — accumulates the knowledge.**
 > Integration surface = one module addition (the context store + the raw
-> model/harness seams) and one instance creation. Nothing more.
+> model/harness seams) and one instance creation per run. Nothing more.
 
 `@llmx/evolution` is ports-only internally, but since the composition root
 (`Evolution`) ships in the package, a client never touches the wiring graph —
-no registry, wiki, pinpointer, distiller, or loop construction.
+no registry, wiki, pinpointer, distiller, wiki agent, or loop construction.
 
 ```mermaid
 flowchart TB
-    H["harness adapter (client) — any executor type"]
-    H -->|"TaskEvent · TranscriptRecord (usage)"| TS["trajectory store"]
-    H ---|"definitions: read"| CS["context store (client-owned, read & write)"]
-    CS ---|"approved patches: write"| EVO["Evolution (composition root)"]
+    H["harness (client) — any executor"]
+    H -->|"one Trajectory (step tree, per run)"| EVO["Evolution (composition root)"]
+    H ---|"definitions: read / approved patches: write"| CS["context store (client-owned)"]
     M["raw model call (client) — the framework owns the prompts"]
-    M -->|"PromptedJudger: judging"| EVO
-    TS --> EVO
+    M -->|"judger: observing · wiki agent: row synthesis"| EVO
+    subgraph D["distiller — LLM + traditional code"]
+        V["compact lossless view (steps + rendered contexts + edges)"]
+    end
+    EVO --> D
+    D -->|"DistilledRun (view + observations)"| W["wiki agent (LLM)"]
+    WP["wiki persistence (cross-run)"]
+    W --> WP
+    EVO --- WP
     subgraph E["derived — no client wiring"]
-        REG["context registry (store defs + trajectory edges)"]
-        W["wiki · pinpointer"]
-        D["distiller"]
+        REG["context registry (store defs + trajectory usage edges)"]
+        P["pinpointer (deterministic blame)"]
         ES["eval store"]
         L["evolution loop"]
     end
@@ -33,83 +40,80 @@ flowchart TB
     H -->|"forked runs (patched context + evals)"| EVO
 ```
 
-## Two lifecycles, one instance
+## Two lifecycles, one wiki
 
-The same `Evolution` instance supports both scenarios through two
-operations: `maintain()` (idempotent, incremental — keeps the wiki current)
-and `run()` (re-entrant full pass — evolve + gate). `run()` calls
-`maintain()` first, so calling it alone is always correct.
+A `Trajectory` is **from a single run**; the **wiki** maintains knowledge
+across many runs through its persistence backend. The same `Evolution`
+instance supports two operations: `maintain()` (idempotent — distills the
+run into the wiki once) and `run()` (re-entrant full pass — eval → evolve →
+gate). `run()` calls `maintain()` first, so calling it alone is always
+correct.
 
-**Scenario 1 — offline evolution.** The live app produces the trajectory and
-keeps the wiki maintained; evolution happens later, in one batch:
+**Scenario 1 — offline evolution.** Create one instance per finished run,
+sharing one durable wiki:
 
 ```mermaid
 sequenceDiagram
     participant App as live app
-    participant Evo as Evolution
-    App->>Evo: maintain() (after each recorded run)
-    Note over Evo: distills each run exactly once → wiki
-    App->>Evo: maintain()
-    App->>Evo: maintain()
-    App->>Evo: run() (later — the batch)
-    Note over Evo: eval → evolve → gate over accumulated failures
-    Evo-->>App: approved patches
+    participant Evo1 as Evolution (run 1)
+    participant Wiki as wiki (shared persistence)
+    App->>Evo1: new Evolution({ trajectory: run1, persistence: wiki }).run()
+    Evo1->>Wiki: rows from run 1's response
+    App->>App: … more runs happen …
+    App->>Evo1: new Evolution({ trajectory: run2, persistence: wiki }).run()
+    Note over Wiki: the wiki agent sees prior rows — cross-run patterns
 ```
 
 **Scenario 2 — realtime evolution, then continue the task.** Evolution runs
-mid-task and writes the approved patches to the context store itself; the
-task continues rendering from the same store — new runs re-sync the derived
-context graph and later passes pick up only new failures:
+mid-task, writes the approved patches to the context store itself, and the
+task continues rendering from the same store; the next run's instance picks
+up from the accumulated wiki:
 
 ```mermaid
 sequenceDiagram
     participant App as live app (mid-task)
-    participant Evo as Evolution
+    participant Evo as Evolution (this run)
     App->>Evo: run()
-    Note over Evo: proposes only failures not yet proposed
-    Evo->>Evo: writes approved patches to the context store
-    Evo-->>App: this pass's approved patches (already applied)
-    Note over App: task continues · records new runs (patched defs re-rendered)
-    App->>Evo: run() (same instance, later)
-    Note over Evo: registry re-synced from store + trajectory · only new culprits proposed
-    Evo-->>App: newly approved patches
+    Note over Evo: distill → wiki rows → propose → validate → gate
+    Evo->>App: approved patches (already written to the context store)
+    Note over App: task continues · next run gets its own instance
 ```
 
 What makes both work:
 
-- `maintain()` judges each run **exactly once** — a run already distilled is
-  never re-sent to the `Judger`.
-- The context registry **re-syncs on every `maintain()`** — definitions
-  re-read from the context store (so patches evolution wrote are
-  immediately the current form) plus usage edges from the trajectory; later
-  forked validations verify against the *current* form.
-- `run()` is **re-entrant without churn**: a culprit already proposed in an
-  earlier pass (its retry budget spent) is never re-proposed by the same
-  instance.
-- `result.approved` is **this pass's** approvals — each already written to
-  the context store, so the continuing task renders the patched form.
+- `maintain()` distills the run **exactly once** per instance — a second call
+  is a no-op.
+- The wiki agent receives the response **plus the wiki's prior rows**, so it
+  searches across runs for patterns, lessons, and failure reasons instead of
+  relaying one run's observations.
+- The context registry re-derives from the context store (definitions —
+  patches evolution wrote are immediately current) plus the trajectory's
+  usage edges (each agent run → every tool it was offered).
+- `run()` is **re-entrant without churn** within an instance: a culprit
+  already proposed in an earlier pass (its retry budget spent) is never
+  re-proposed by the same instance.
 
-> ponytail: the distilled-run and proposed-culprit sets are per-instance. A
-> long-lived offline instance that must survive restarts re-judges its
-> history (wiki rows dedup by id, so correctness holds); persist the sets
-> alongside the wiki when that cost matters.
+> ponytail: the distilled flag and proposed-culprit set are per-instance. A
+> new instance re-proposes a culprit whose failure still sits in the wiki;
+> persist the proposed set alongside the wiki when that cost matters.
 
 ## The client contract — three things, total
 
-### 1. Record a trajectory (usage) + own the context store (definitions)
+### 1. Provide one run's trajectory (usage) + own the context store (definitions)
 
-Two inputs, one responsibility split:
-
-- **The trajectory** answers *what was used, and when* — recorded by your
-  harness adapter (any executor type) as `TaskEvent`s and
-  `TranscriptRecord`s.
+- **The trajectory** answers *what happened in this run* — one `Trajectory`
+  value: the agent's run as a step tree (user/system messages, assistant
+  text and thinking, tool calls with their results, spawned agents nested
+  under their spawn step). It is declared structurally in
+  `@llmx/evolution` (`trajectory.ts`) so whatever your executor produced
+  satisfies it — **no executor import in either direction**.
 - **The context store** answers *what the contexts are* — the authoritative
   artifacts (agents, skills, tool docs), addressed by reference, in **read &
   write** mode. It's a three-method port the client implements over whatever
   it already uses — files on disk, a database, or the executor's own stores:
 
 ```ts
-import type { ContextStore } from '@llmx/evolution';
+import type { ContextStore, Trajectory } from '@llmx/evolution';
 
 /** File-backed example: agent YAML bodies + SKILL.md files. */
 export class FileContextStore implements ContextStore {
@@ -117,38 +121,29 @@ export class FileContextStore implements ContextStore {
   get(id) { /* one artifact by reference */ }
   write(context) { /* persist the patched form — the ONLY write path */ }
 }
+
+// One recorded run, handed over as-is — your executor's trajectory value
+// satisfies the shape structurally (agentId, task, depth, context, steps).
+const trajectory: Trajectory = missionResult.trajectory;
 ```
 
 `write` is reserved for applying gate-approved patches — evolution never
 writes anything else, and never invents contexts. Definitions come from the
-store; usage comes from the trajectory; the registry merges the two (store
-definitions + observed usage edges), and a context the store does not own is
-never a patch target.
+store; usage (which agent rendered which tool, when) comes from the
+trajectory; the registry merges the two, and a context the store does not
+own is never a patch target.
 
-**The trajectory side** — whatever runtime you own, write two kinds of rows
-into an `InMemoryTrajectoryStore` (or your own `TrajectoryStore`):
-
-- **One `TaskEvent` per task** via `onTask` — with `contextsUsed` (which
-  contexts were rendered, `recordRef` pointing at the rendered record) and
-  `contextEdges` (which context used which). `parentId` is ownership
-  (spawned → spawner); `inputRefs`/`outputRefs` is provenance.
-- **One `TranscriptRecord` per transcript message** via `record` — role
-  (`user` / `assistant` / `tool_call` / `tool_result` /
-  `context_injection` / `verdict`) and **real content**. Content is what
-  fact-matching (`firstIntroduction`) searches, and `context_injection`
-  records are where evolution gets each context's content.
-
-Two id conventions make derivation work: context ids carry their kind
-prefix (`tool:…`, `skill:…`, anything else is an agent) and match the
-context store's references, and context edges run `from → to` = "from
-depends on to".
+One id convention makes derivation work: a tool's context id is
+`tool:<name>` (the trajectory model derives it), and an agent's context id
+is its `agentId` — both must match the context store's references for a
+culprit to be patchable.
 
 ### 2. One module addition — the context store + the raw seams
 
 The only things evolution cannot provide for itself are your artifacts (the
 `ContextStore` above) and two raw seams. Write them once, in one adapter
-module — **no prompts**: the framework owns every prompt (judging today;
-patch proposing is a marked seam):
+module — **no prompts**: the framework owns every prompt (observing, the wiki
+agent's row synthesis, judging):
 
 ```ts
 import type { ModelCall, RunRunner } from '@llmx/evolution';
@@ -170,33 +165,42 @@ export const runner: RunRunner = {
 };
 ```
 
-The judging prompt itself (`PromptedJudger`) is maintained by the framework:
-grounded-only rules, the rendered contexts, the transcript, a strict JSON
-judgment protocol, and response validation (culprit refs must be rendered
-contexts; malformed model output throws rather than silently judging). A
-`judger` option still exists as an override for tests or fully custom
-judgment protocols — the normal client never writes one.
+The prompts themselves are maintained by the framework:
+
+- **The distiller** (`DefaultTrajectoryDistiller`) is an LLM plus traditional
+  code: the traditional half projects the trajectory into a compact,
+  **lossless** view (every step kept, rendered contexts, and the implicit
+  relations made explicit as edges — `spawned` ownership edges, `used`
+  context-usage edges); the LLM half (`PromptedJudger`) observes that view and
+  returns grounded observations under a strict JSON protocol (culprit refs
+  must be rendered contexts; malformed output throws rather than silently
+  judging).
+- **The wiki agent** (`PromptedWikiAgent`) takes the responses plus the
+  wiki's prior rows and produces structured rows — generalizing across runs
+  into patterns, lessons, and failure reasons rather than relaying
+  observations verbatim. Same validation rules; row ids are deterministic
+  (`runId:index`).
+
+`Judger` and `WikiAgent` overrides exist for tests or fully custom
+protocols — the normal client never writes them (exactly one of `model` /
+both overrides is required at construction).
 
 ### 3. Instance creation — then it drives itself
 
 ```ts
 import {
   Evolution,
-  InMemoryTrajectoryStore,
   SqliteWikiPersistence,
 } from '@llmx/evolution';
 
-const trajectory = new InMemoryTrajectoryStore();
-// …your harness adapter records into it as tasks run…
-
 const result = await new Evolution({
-  contexts,           // your ContextStore (definitions, read & write)
-  trajectory,         // usage — what was used, when
-  model,              // raw model call — the framework writes the prompts
-  runner,             // from your adapter module
+  trajectory,        // this run's step tree (usage)
+  contexts,         // your ContextStore (definitions, read & write)
+  model,            // raw model call — the framework writes the prompts
+  runner,           // from your adapter module
   decide: (v) => humanReview(v),          // optional — default rejects all
-  persistence: new SqliteWikiPersistence( // optional — default in-memory
-    'data/evolution-wiki.sqlite'),
+  persistence: new SqliteWikiPersistence( // optional — default in-memory;
+    'data/evolution-wiki.sqlite'),        // durable = knowledge across runs
   sourcePaths: ['src', 'packages'],       // optional — see below
 }).run();
 
@@ -206,14 +210,13 @@ const result = await new Evolution({
 // result.retriesUsed
 ```
 
-`maintain()` keeps the wiki current (call it — awaited — as the live app
-records); `run()` performs the whole pass — `maintain()`, then, in order:
+`maintain()` keeps the wiki current (call it — awaited — whenever you want
+the run distilled without evolving); `run()` performs the whole pass —
+`maintain()`, then, in order:
 
-1. **Derive + distill** — the context registry re-syncs (definitions from
-   the context store, usage edges from `contextEdges`; rendered contexts
-   the store doesn't own stay graph-visible but unpatchable) and each
-   *unseen* top-level run becomes wiki rows via the framework's
-   `PromptedJudger` over your `ModelCall`, exactly once.
+1. **Distill + wikify** — the trajectory becomes the compact lossless view,
+   the judger observes it, and the wiki agent turns the response (plus prior
+   rows) into structured rows, once.
 2. **Eval** — for each prioritized failure: test instances derived for the
    culprit + its dependents, persisted deduplicated.
 3. **Evolve** — propose → validate on forked runs (your `RunRunner`) →
@@ -225,19 +228,20 @@ records); `run()` performs the whole pass — `maintain()`, then, in order:
 
 | | Provided by |
 |---|---|
-| Trajectory data (`TaskEvent`s, records) | **you** — harness adapter (any executor) |
+| The run's `Trajectory` (step tree) | **you** — any executor's value, structural |
 | Context definitions, read & write | **you** — `ContextStore` in the adapter module |
 | Raw model call (`ModelCall`), `RunRunner`, gate `decide` | **you** — one adapter module |
-| The judging prompt (`PromptedJudger`) | evolution — framework-owned |
-| Context registry, dependency graph | evolution — from the trajectory |
-| Wiki, pinpointing, retention | evolution |
-| Distiller, eval store, test derivation | evolution |
+| The distiller (view + edges, judging prompt) | evolution — framework-owned |
+| The wiki agent (row synthesis prompt) | evolution — framework-owned |
+| Context registry, dependency graph, usage edges | evolution — from the trajectory + store |
+| Wiki, pinpointing, retention, cross-run persistence | evolution |
+| Eval store, test derivation | evolution |
 | Proposer, verifier, retry bounding, loop | evolution |
 | Patch application | default appends text; override via `applier` |
 | Source-code exclusion | you — mention paths via `sourcePaths`; never patched |
 
 Everything except the client seams is a pure function of the two client
-inputs: the trajectory (usage) and the context store (definitions).
+inputs: the run's trajectory (usage) and the context store (definitions).
 
 ### Source code never participates
 
@@ -247,7 +251,7 @@ source code paths at instance creation and every context whose id is one of
 those paths — or lives under one as a directory — is excluded from every
 patching phase: no eval derivation, no proposal, no forked validation, no
 gate. Failures blamed on source code still land in the wiki as knowledge
-(what the `Judger` records); compensating for them is a `Judger` judgment
+(what the wiki agent records); compensating for them is a wiki-agent judgment
 (blame the prompt layer), never a code patch.
 
 ## Open seams (by design)
@@ -256,9 +260,10 @@ Two seams are deliberately unimplemented and marked `ponytail:` in the
 source: the `RunRunner`'s forked-run body (yours — it is your harness), and
 the proposer's patch *text* (the default proposes an empty patch; it will be
 framework-prompted over the same `ModelCall` when patch content matters).
-The judging prompt is **not** an open seam — `PromptedJudger` owns it.
-Everything else — trajectory, pinpointing, wiki retention, eval derivation,
-verdict distillation, retry bounding, gating — runs on the provided defaults.
+The distiller's view is untruncated by design (one model call per run);
+window or stream it when real runs outgrow a single prompt. Everything else
+— the view + edges, pinpointing, wiki retention, eval derivation, verdict
+distillation, retry bounding, gating — runs on the provided defaults.
 
 See `docs/architecture/evolution-framework.md` for the design and
 `docs/adr/` for the substrate decision.
