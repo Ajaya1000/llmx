@@ -42,4 +42,24 @@ flowchart LR
 
 ### Evolve
 - Evolution happens only the participating `Contexts`.
-- 
+- This loop proposes new patch to the context & with validation gate it either accepts or rejects the patch and moves ahead.
+- The patch is created with the historical trajectory information including previous evolution loop trajectory, and the newer evals.
+- The validation happens on top of all the evals, i.e new & old.
+
+```mermaid
+flowchart LR
+    Trajectory-->TrajectoryDistiller["Trajectory\n Distiller"]-->WIKI
+    subgraph Evolution["Evolution Loop"]
+        WIKI-->Proposer
+        Proposer["Patch Proposer"]-->|"c+c`"|Verifier
+        Verifier-->|"evolution trajectory"|VerifierDistiller["Verifier Distiller"]
+        VerifierDistiller-.->WIKI
+    end
+    
+    TrajectoryDistiller-->Eval
+    Eval["Eval Loop"]-->|"evals"|Proposer
+    
+    Context["Context Store"]-->Proposer
+```
+- The distillers create more structured output from the trajectory.
+- Wiki maintains patterns, lessons, any naural language structure to help proposer better. It maintains a persistent histrory across multiple flow.
