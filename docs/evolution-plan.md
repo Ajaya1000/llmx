@@ -217,3 +217,7 @@ packages/evolution/         # @llmx/evolution — standalone npm workspace
 - [ ] Wire `Executor` / `spawn_agent` / `back_pressure` into the mission runtime.
 - [ ] Substrate adapter that publishes `TaskEvent`s (incl. context edges) from a real runtime.
 - [ ] Hook the distillers as post-mission passes.
+
+## Notes
+- Patch proposer wrong. It should define thw whole patch in single bundle and the validation will happen on the whole patch not individual failures.
+- Whole wiki is provided. Not just failures to the proposer.

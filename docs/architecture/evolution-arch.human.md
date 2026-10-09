@@ -1,8 +1,3 @@
-## Notes
-- Patch proposer wrong. It should define thw whole patch in single bundle and the validation will happen on the whole patch not individual failures.
-- Whole wiki is provided. Not just failures to the proposer.
-
-
 # Architecture
 
 For a evoution to happen we need the following info as input
@@ -60,6 +55,8 @@ flowchart LR
     Eval["Eval Loop"]-->|"evals"|Proposer
     
     Context["Context Store"]-->Proposer
+
+    Evolution-->|"success patch"|Context
 ```
 - The distillers create more structured output from the trajectory.
 - Wiki maintains patterns, lessons, any naural language structure to help proposer better. It maintains a persistent histrory across multiple flow.
