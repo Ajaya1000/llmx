@@ -31,3 +31,5 @@ Task execution system for LLMs: composes only the skills/tools relevant to one t
 Never edit any file with `.human.*` e.g `readme.human.md`. This is a strict requirement. If you ever see any drift, only report.
 
 Always ask for confirmation when needed. Do not take big implicit decision and report all small implicit decision that you have taken.
+
+> Note: Keep the comments as minimal and as straight forward as possible. Avoi long paragraph.

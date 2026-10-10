@@ -1,3 +1,4 @@
+import type OpenAI from 'openai';
 import {
   DefaultTestInstanceDeriver,
   InMemoryContextEvalStore,
@@ -8,6 +9,7 @@ import {
   type PatchApplier,
 } from './evolution-loop.ts';
 import { DefaultGate, type GateDecision } from './gate.ts';
+import { modelFromOpenAI } from './model/completion.ts';
 import { DefaultPinpointer } from './pinpoint.ts';
 import type { ContextStore, ModelCall, WikiPort } from './ports.ts';
 import { DefaultPatchProposer } from './proposer.ts';
@@ -52,12 +54,19 @@ export interface EvolutionOptions {
   readonly contexts: ContextStore;
   /** Raw model-call seam; the framework builds its prompts on this. */
   readonly model?: ModelCall;
-  /** Judger override (tests, fully custom observation); default is the
-   * framework-owned `PromptedJudger` over `model`. */
+  /**
+   * OpenAI client; adapted to a `ModelCall` by sending each framework prompt
+   * as one user chat message. Needs `openaiModel`. Takes effect only when
+   * `model` is absent; `model` wins when both are given.
+   */
+  readonly openai?: OpenAI;
+  /** Chat model name for `openai.chat.completions.create`. */
+  readonly openaiModel?: string;
+  /** Judger override (tests/deterministic observing); needs `wikiAgent` too
+   * unless `model`/`openai` supplies the default prompted one. */
   readonly judger?: Judger;
-  /** Wiki agent override (tests, fully custom row synthesis); default is
-   * the framework-owned `PromptedWikiAgent` over `model`. Exactly one of
-   * `model` / (`judger` + `wikiAgent`) is required. */
+  /** Wiki-agent override (tests/deterministic rows); needs `judger` too
+   * unless `model`/`openai` supplies the default prompted one. */
   readonly wikiAgent?: WikiAgent;
   /** Harness seam: forked validation runs (patched context + evals). */
   readonly runner: RunRunner;
@@ -113,14 +122,15 @@ export class Evolution {
     this.applier = options.applier ?? appendPatch;
     this.contexts = options.contexts;
     this.sourcePaths = options.sourcePaths ?? [];
-    const model = options.model;
+    const model =
+      options.model ?? modelFromOpenAI(options.openai, options.openaiModel);
     const judger =
       options.judger ?? (model ? new PromptedJudger(model) : undefined);
     const wikiAgent =
       options.wikiAgent ?? (model ? new PromptedWikiAgent(model) : undefined);
     if (!judger || !wikiAgent)
       throw new Error(
-        'Evolution needs a model call or both a judger and a wiki agent override.',
+        'Evolution needs a model call or both a judger and a wiki agent override (model call may be `model` or `openai`).',
       );
     this.distiller = new DefaultTrajectoryDistiller(judger);
     this.wikiAgent = wikiAgent;

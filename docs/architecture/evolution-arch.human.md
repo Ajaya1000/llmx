@@ -13,7 +13,7 @@ During the evolution we get the below items as output
 
 ### Evals
 - Evals are also persisted after a failure trajectory. 
-- The eval creator takes into account of the previously available evals. If this is already coveed then it doesn't create more evals.
+- The eval creator takes into account of the previously available evals. If this is already covered then it doesn't create more evals.
 - For a newer test instance, it defines the eval and the required environment.
 
 We mainly need 2(Agentic) + 1 (Orchestrator) components.
@@ -28,7 +28,7 @@ flowchart LR
     EvalProposer -->ProposedEvals["Set<{eval: Eval,\n contextId: Ref}>\n()"]
     
     subgraph EvalMaintainer["Eval Maintainer"]
-        EvalItem["Eval Item\n(Eval,ContextId)"]-->EvalAgent["Indiviual\nEval\nAgent"]
+        EvalItem["Eval Item\n(Eval,ContextId)"]-->EvalAgent["Indiviual\nEval\nmaintainer\nAgent"]
         EvalAgent-->Selection["Accept/Reject"]
     end
 
@@ -58,5 +58,5 @@ flowchart LR
 
     Evolution-->|"success patch"|Context
 ```
-- The distillers create more structured output from the trajectory.
+- Distillers create more structured output from the trajectory.
 - Wiki maintains patterns, lessons, any naural language structure to help proposer better. It maintains a persistent histrory across multiple flow.
