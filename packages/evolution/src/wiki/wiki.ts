@@ -1,7 +1,7 @@
 import type { Pinpointer } from '../pinpoint.ts';
 import type { WikiPort } from '../ports.ts';
 import type { Ref } from '../types.ts';
-import type { Blame, WikiRow } from '../wiki-types.ts';
+import type { Blame, WikiRow } from './wiki-types.ts';
 import { DefaultRetentionPolicy, type RetentionPolicy } from './retention.ts';
 import type { WikiPersistence } from './wiki-persistence.ts';
 

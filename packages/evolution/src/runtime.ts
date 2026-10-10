@@ -8,29 +8,29 @@ import {
   DefaultEvolutionLoop,
   type PatchApplier,
 } from './evolution-loop.ts';
-import { DefaultGate, type GateDecision } from './gate.ts';
+import { DefaultGate, type GateDecision } from './gate/gate.ts';
 import { modelFromOpenAI } from './model/completion.ts';
 import { DefaultPinpointer } from './pinpoint.ts';
 import type { ContextStore, ModelCall, WikiPort } from './ports.ts';
-import { DefaultPatchProposer } from './proposer.ts';
-import type { ApprovedPatch } from './store/approved-patches.ts';
-import { InMemoryContextRegistry } from './store/context-registry.ts';
-import { DefaultWikiMaintainer } from './store/wiki.ts';
+import { DefaultPatchProposer } from './proposer/context-patch-proposer.ts';
+import type { ApprovedPatch } from './context/approved-patches.ts';
+import { InMemoryContextRegistry } from './context/context-registry.ts';
+import { DefaultWikiMaintainer } from './wiki/wiki.ts';
 import {
   InMemoryWikiPersistence,
   type WikiPersistence,
-} from './store/wiki-persistence.ts';
-import type { Trajectory } from './trajectory.ts';
-import { allRuns, renderedContexts } from './trajectory.ts';
+} from './wiki/wiki-persistence.ts';
+import type { Trajectory } from './trajectory/trajectory.ts';
+import { allRuns, renderedContexts } from './trajectory/trajectory.ts';
 import {
   DefaultTrajectoryDistiller,
   type Judger,
   PromptedJudger,
-} from './trajectory-distiller.ts';
-import { DefaultVerifier, type RunRunner } from './verifier.ts';
-import { DefaultVerifierDistiller } from './verifier-distiller.ts';
-import { PromptedWikiAgent, type WikiAgent } from './wiki-distiller.ts';
-import type { Verdict, WikiRow } from './wiki-types.ts';
+} from './trajectory/trajectory-distiller.ts';
+import { DefaultVerifier, type RunRunner } from './verifier/verifier.ts';
+import { DefaultVerifierDistiller } from './verifier/verifier-distiller.ts';
+import { PromptedWikiAgent, type WikiAgent } from './wiki/wiki-distiller.ts';
+import type { Verdict, WikiRow } from './wiki/wiki-types.ts';
 
 /**
  * The composition root — the whole integration surface. The client provides

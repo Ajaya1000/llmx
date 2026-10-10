@@ -1,5 +1,5 @@
 import type { Author, Ref } from './types.ts';
-import type { WikiRow } from './wiki-types.ts';
+import type { WikiRow } from './wiki/wiki-types.ts';
 
 /**
  * Back-pressure: a correction authored against one blamed ref, pushed

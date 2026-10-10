@@ -1,4 +1,4 @@
-import type { ContextRegistry } from './store/context-registry.ts';
+import type { ContextRegistry } from './context/context-registry.ts';
 import {
   renderedContexts,
   stepKind,
@@ -7,9 +7,9 @@ import {
   type TrajectoryEntry,
   toolRef,
   walkTrajectory,
-} from './trajectory.ts';
+} from './trajectory/trajectory.ts';
 import type { Ref } from './types.ts';
-import type { Blame, Culprit, FailureLocation } from './wiki-types.ts';
+import type { Blame, Culprit, FailureLocation } from './wiki/wiki-types.ts';
 
 /**
  * Deterministic, graph-aware blame. Given a grounded fact (a string that

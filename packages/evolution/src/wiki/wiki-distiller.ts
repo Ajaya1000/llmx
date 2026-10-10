@@ -1,6 +1,6 @@
-import type { ModelCall } from './ports.ts';
-import type { DistilledRun } from './trajectory-distiller.ts';
-import type { Ref } from './types.ts';
+import type { ModelCall } from '../ports.ts';
+import type { DistilledRun } from '../trajectory/trajectory-distiller.ts';
+import type { Ref } from '../types.ts';
 import type { Culprit, WikiRow, WikiRowKind } from './wiki-types.ts';
 
 /**

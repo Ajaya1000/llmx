@@ -1,9 +1,9 @@
 import type { WikiPort } from './ports.ts';
-import type { PatchProposer } from './proposer.ts';
-import type { ContextRegistry } from './store/context-registry.ts';
+import type { PatchProposer } from './proposer/context-patch-proposer.ts';
+import type { ContextRegistry } from './context/context-registry.ts';
 import type { Context } from './types.ts';
-import type { Verifier } from './verifier.ts';
-import type { ContextPatch, Verdict } from './wiki-types.ts';
+import type { Verifier } from './verifier/verifier.ts';
+import type { ContextPatch, Verdict } from './wiki/wiki-types.ts';
 
 /** Applies a proposed patch to one context to get its patched form (never in place). */
 export type PatchApplier = (context: Context, patch: ContextPatch) => Context;

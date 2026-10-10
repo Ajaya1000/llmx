@@ -21,10 +21,10 @@ export type {
   PatchApplier,
 } from './evolution-loop.ts';
 export type { Executor } from './executor.ts';
-export type { Gate, GateDecision } from './gate.ts';
+export type { Gate, GateDecision } from './gate/gate.ts';
 export type { Pinpointer } from './pinpoint.ts';
 export type { ContextStore, ModelCall, WikiPort } from './ports.ts';
-export type { PatchProposer } from './proposer.ts';
+export type { PatchProposer } from './proposer/context-patch-proposer.ts';
 export {
   Evolution,
   type EvolutionOptions,
@@ -33,16 +33,16 @@ export {
 export type {
   ApprovedPatch,
   ApprovedPatchStore,
-} from './store/approved-patches.ts';
-export type { ContextRegistry } from './store/context-registry.ts';
-export { InMemoryContextStore } from './store/context-store.ts';
-export type { RetentionOptions, RetentionPolicy } from './store/retention.ts';
-export type { WikiMaintainer } from './store/wiki.ts';
-export type { WikiPersistence } from './store/wiki-persistence.ts';
-export { SqliteWikiPersistence } from './store/wiki-persistence.ts';
+} from './context/approved-patches.ts';
+export type { ContextRegistry } from './context/context-registry.ts';
+export { InMemoryContextStore } from './context/context-store.ts';
+export type { RetentionOptions, RetentionPolicy } from './wiki/retention.ts';
+export type { WikiMaintainer } from './wiki/wiki.ts';
+export type { WikiPersistence } from './wiki/wiki-persistence.ts';
+export { SqliteWikiPersistence } from './wiki/wiki-persistence.ts';
 export type {
   ContentBlock,
-  JsonObject,
+  JSONObject,
   RenderedContext,
   RunContext,
   StepKind,
@@ -50,7 +50,7 @@ export type {
   Trajectory,
   TrajectoryEntry,
   TrajectoryStep,
-} from './trajectory.ts';
+} from './trajectory/trajectory.ts';
 export {
   allRuns,
   renderedContexts,
@@ -60,7 +60,7 @@ export {
   toolRef,
   toolsOffered,
   walkTrajectory,
-} from './trajectory.ts';
+} from './trajectory/trajectory.ts';
 export type {
   DistilledEntry,
   DistilledKind,
@@ -71,23 +71,17 @@ export type {
   ViewEdge,
   ViewEdgeKind,
   ViewStep,
-} from './trajectory-distiller.ts';
+} from './trajectory/trajectory-distiller.ts';
 export {
   buildRunView,
   DefaultTrajectoryDistiller,
   PromptedJudger,
-} from './trajectory-distiller.ts';
-export type {
-  Author,
-  Context,
-  ContextKind,
-  Ref,
-  Role,
-} from './types.ts';
-export type { RunOutcome, RunRunner, Verifier } from './verifier.ts';
-export type { VerifierDistiller } from './verifier-distiller.ts';
-export type { WikiAgent } from './wiki-distiller.ts';
-export { PromptedWikiAgent } from './wiki-distiller.ts';
+} from './trajectory/trajectory-distiller.ts';
+export type { Author, Context, ContextKind, Ref, Role } from './types.ts';
+export type { RunOutcome, RunRunner, Verifier } from './verifier/verifier.ts';
+export type { VerifierDistiller } from './verifier/verifier-distiller.ts';
+export type { WikiAgent } from './wiki/wiki-distiller.ts';
+export { PromptedWikiAgent } from './wiki/wiki-distiller.ts';
 export type {
   Blame,
   ContextPatch,
@@ -98,4 +92,4 @@ export type {
   Verdict,
   WikiRow,
   WikiRowKind,
-} from './wiki-types.ts';
+} from './wiki/wiki-types.ts';

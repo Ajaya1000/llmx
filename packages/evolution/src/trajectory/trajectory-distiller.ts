@@ -1,4 +1,4 @@
-import type { ModelCall } from './ports.ts';
+import type { ModelCall } from '../ports.ts';
 import {
   allRuns,
   type RenderedContext,
@@ -9,8 +9,8 @@ import {
   type Trajectory,
   walkTrajectory,
 } from './trajectory.ts';
-import type { Ref } from './types.ts';
-import type { Culprit } from './wiki-types.ts';
+import type { Ref } from '../types.ts';
+import type { Culprit } from '../wiki/wiki-types.ts';
 
 /** One compact, lossless step of the distilled view. */
 export interface ViewStep {

@@ -1,4 +1,4 @@
-import type { ContextPatch, Verdict } from '../wiki-types.ts';
+import type { ContextPatch, Verdict } from '../wiki/wiki-types.ts';
 
 /** A patch that passed validation and was approved — retained for audit/replay. */
 export interface ApprovedPatch {

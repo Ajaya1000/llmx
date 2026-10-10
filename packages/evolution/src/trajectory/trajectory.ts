@@ -1,4 +1,4 @@
-import type { ContextKind, Ref } from './types.ts';
+import type { ContextKind, Ref } from '../types.ts';
 
 /**
  * The trajectory model — what one agent run looked like from the model's
@@ -10,7 +10,19 @@ import type { ContextKind, Ref } from './types.ts';
  */
 
 /** A JSON object value — opaque to evolution beyond being JSON. */
-export type JsonObject = { readonly [key: string]: unknown };
+export type JSONValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JSONObject
+  | JSONArray;
+
+export interface JSONObject {
+  [key: string]: JSONValue;
+}
+
+export interface JSONArray extends Array<JSONValue> {}
 
 /** A tool exactly as the model was offered it — its declaration. */
 export interface ToolDescription {
@@ -50,7 +62,7 @@ export type TrajectoryStep =
       type: 'toolCall';
       id: string;
       name: string;
-      arguments: JsonObject;
+      arguments: JSONObject;
       /** The executed tool's result text. */
       result: string;
       isError: boolean;

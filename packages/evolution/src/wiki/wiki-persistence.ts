@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import type { Ref } from '../types.ts';
-import type { WikiRow } from '../wiki-types.ts';
+import type { WikiRow } from './wiki-types.ts';
 
 /** Durable storage for wiki rows — the plugin backend is swappable. */
 export interface WikiPersistence {

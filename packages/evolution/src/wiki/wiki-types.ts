@@ -1,5 +1,5 @@
-import type { StepKind } from './trajectory.ts';
-import type { Author, ContextKind, Ref, Role } from './types.ts';
+import type { StepKind } from '../trajectory/trajectory.ts';
+import type { Author, ContextKind, Ref, Role } from '../types.ts';
 
 /** What a wiki row records. */
 export type WikiRowKind =

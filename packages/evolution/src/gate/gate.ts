@@ -1,4 +1,4 @@
-import type { Verdict } from './wiki-types.ts';
+import type { Verdict } from '../wiki/wiki-types.ts';
 
 export type GateDecision = 'approved' | 'rejected';
 

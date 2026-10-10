@@ -1,4 +1,4 @@
-import type { ContextPatch, Verdict, WikiRow } from './wiki-types.ts';
+import type { ContextPatch, Verdict, WikiRow } from '../wiki/wiki-types.ts';
 
 /**
  * Turns validation verdicts into wiki rows: a passing patch becomes a

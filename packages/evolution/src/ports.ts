@@ -1,5 +1,5 @@
 import type { Context, Ref } from './types.ts';
-import type { Blame, WikiRow } from './wiki-types.ts';
+import type { Blame, WikiRow } from './wiki/wiki-types.ts';
 
 /**
  * The seams of the evolution framework. Everything depends on these, nothing

@@ -1,5 +1,5 @@
-import type { Context, Ref } from './types.ts';
-import type { ContextPatch, Verdict } from './wiki-types.ts';
+import type { Context, Ref } from '../types.ts';
+import type { ContextPatch, Verdict } from '../wiki/wiki-types.ts';
 
 /** One forked validation run — "new test instance + evals", never live. */
 export interface RunOutcome {

@@ -1,6 +1,6 @@
-import type { ContextRegistry } from './store/context-registry.ts';
-import type { Ref } from './types.ts';
-import type { ContextPatch, Verdict, WikiRow } from './wiki-types.ts';
+import type { ContextRegistry } from '../context/context-registry.ts';
+import type { Ref } from '../types.ts';
+import type { ContextPatch, Verdict, WikiRow } from '../wiki/wiki-types.ts';
 
 /**
  * Patch proposer. Maps prioritized failures to candidate patches: a failure's

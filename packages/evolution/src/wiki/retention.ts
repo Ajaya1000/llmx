@@ -1,5 +1,5 @@
 import type { Ref } from '../types.ts';
-import type { WikiRow } from '../wiki-types.ts';
+import type { WikiRow } from './wiki-types.ts';
 
 export interface RetentionOptions {
   /** Evict only when unused for longer than this (ms). Default 30 days. */
