@@ -1,10 +1,15 @@
-import type { ConversationCreateOptions } from '@earendil-works/pi-durable';
+import type {
+  ConversationCreateOptions,
+  ToolRegistration,
+} from '@earendil-works/pi-durable';
+import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { AgentContextDoc } from './agent-context.js';
 import { createBuiltinModels } from './builtin-models.js';
 import {
   ctx,
   type DurableHarnessConfig,
   getDurableHarness,
+  installCodingTools,
   installSpawnTool,
 } from './durable-harness.js';
 import { DurableAgentSession } from './durable-session.js';
@@ -28,6 +33,10 @@ export interface CreateSessionParams {
   harness?: DurableHarnessConfig;
   /** When set, the `spawn_agent` tool is added to this conversation, bound to this handler. */
   spawn?: SpawnHandler;
+  /** The agent's instructions (system prompt), rendered after extension sections. */
+  instructions?: string;
+  /** Offers pi-durable's coding tools (read/write/edit/bash) to this conversation. */
+  codingTools?: boolean;
 }
 
 /**
@@ -55,16 +64,23 @@ export class AgentSessionRepository {
       ? createSpawnAgentTool(params.spawn)
       : undefined;
     if (spawnTool) await installSpawnTool(spawnTool);
+    const codingTools = params.codingTools ? (CodingTools.tools ?? []) : [];
+    if (codingTools.length > 0) await installCodingTools();
+    const tools: ToolRegistration[] = [
+      ...(spawnTool ? [spawnTool] : []),
+      ...codingTools,
+    ];
 
     const conversationOption: ConversationCreateOptions = {
       ownership: { kind: 'ownerless' },
       agent: {
         model: { provider: model.provider, modelId: model.id },
         ...(params.cwd ? { cwd: params.cwd } : {}),
+        ...(params.instructions ? { instructions: params.instructions } : {}),
         // An array offers exactly these extension-provided tools; an empty
         // list offers none — leaf agents (and conversations without a spawn
         // handler) must not even see spawn_agent.
-        tools: spawnTool ? [spawnTool] : [],
+        tools,
       },
       init: async (tx, conversationId) => {
         if (!params.agentContext) return;

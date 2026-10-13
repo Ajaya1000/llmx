@@ -480,12 +480,27 @@ describe('spawn (factory edge policy)', () => {
 
     expect(spawned?.text).toBe('child done');
     expect(spawned?.trajectory).toEqual({
-      agentId: 'explore',
-      task: 'recon',
-      depth: 3,
-      context: { tools: [] },
-      transcript: [],
-      steps: [],
+      flow: 'recon',
+      definition: [
+        { id: 'explore', type: 'llm', tools: [], task: 'recon', depth: 3 },
+        {
+          id: 'user:explore',
+          type: 'user',
+          description: 'Input to explore',
+          ownerAgentId: 'explore',
+        },
+      ],
+      traces: [],
+      sourceRecords: [
+        {
+          itemRef: 'explore',
+          task: 'recon',
+          depth: 3,
+          context: { tools: [] },
+          transcript: [],
+          traceMap: [],
+        },
+      ],
     });
     expect(session.seeds[0]).toContain('recon');
   });

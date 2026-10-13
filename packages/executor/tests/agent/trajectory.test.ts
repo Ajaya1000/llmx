@@ -1,5 +1,4 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
-import type { ThinkingContent } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
 import { TaskExecutor } from '../../src/agent/agent.ts';
 import type { AgentDefinition } from '../../src/agent/agents.ts';
@@ -12,7 +11,7 @@ import type {
   AgentRunContext,
   AgentTrajectory,
   MissionUi,
-  TrajectoryStep,
+  ToolTrajectoryTrace,
 } from '../../src/types.ts';
 
 const silentUi: MissionUi = {
@@ -45,35 +44,51 @@ const runContext: AgentRunContext = {
   ],
 };
 
+/** A pre-built child flow whose own records already nest a grandchild. */
 const childTrajectory: AgentTrajectory = {
-  agentId: 'explore',
-  task: 'recon',
-  depth: 1,
-  context: { tools: [] },
-  transcript: [{ role: 'user', content: 'recon', timestamp: 0 }],
-  steps: [
-    { role: 'user', content: 'recon', timestamp: 0 },
+  flow: 'recon',
+  definition: [
+    { id: 'explore', type: 'llm', tools: [], task: 'recon', depth: 1 },
     {
-      type: 'toolCall',
-      id: 'g1',
-      name: 'spawn_agent',
-      arguments: { agent: 'dig', task: 'deep recon' },
-      result: 'grandchild summary',
-      isError: false,
-      child: {
-        agentId: 'dig',
-        task: 'deep recon',
-        depth: 2,
-        context: { tools: [] },
-        transcript: [],
-        steps: [{ type: 'text', text: 'grandchild summary' }],
-      },
+      id: 'user:explore',
+      type: 'user',
+      description: 'Input to explore',
+      ownerAgentId: 'explore',
+    },
+  ],
+  traces: [
+    { itemRef: 'user:explore', message: 'recon' },
+    { itemRef: 'explore', message: { role: 'assistant', content: 'digging' } },
+  ],
+  sourceRecords: [
+    {
+      itemRef: 'explore',
+      task: 'recon',
+      depth: 1,
+      context: { tools: [] },
+      transcript: [{ role: 'user', content: 'recon', timestamp: 0 }],
+      traceMap: [{ transcriptIndex: 0, traceIndex: 0 }],
+    },
+    {
+      itemRef: 'dig',
+      task: 'deep recon',
+      depth: 2,
+      context: { tools: [] },
+      transcript: [],
+      traceMap: [{ transcriptIndex: 0, traceIndex: 1 }],
     },
   ],
 };
 
-/** A raw transcript: system (tool declarations) → user → assistant (thinking, text, toolCall) → toolResult → assistant. */
+/** A raw transcript: system (tool declarations) → user → assistant (toolCall) → toolResult → assistant. */
 function transcript(): AgentMessage[] {
+  const meta = {
+    api: 'test',
+    provider: 'test',
+    model: 'test',
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, sections: {} },
+    timestamp: 0,
+  };
   return [
     {
       role: 'system',
@@ -91,7 +106,6 @@ function transcript(): AgentMessage[] {
     {
       role: 'assistant',
       content: [
-        { type: 'thinking', thinking: 'deciding how to approach this' },
         { type: 'text', text: 'delegating recon' },
         {
           type: 'toolCall',
@@ -100,18 +114,8 @@ function transcript(): AgentMessage[] {
           arguments: { agent: 'explore', task: 'recon' },
         },
       ],
-      api: 'test',
-      provider: 'test',
-      model: 'test',
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        sections: {},
-      },
+      ...meta,
       stopReason: 'toolUse',
-      timestamp: 0,
     },
     {
       role: 'toolResult',
@@ -124,18 +128,8 @@ function transcript(): AgentMessage[] {
     {
       role: 'assistant',
       content: [{ type: 'text', text: 'found it' }],
-      api: 'test',
-      provider: 'test',
-      model: 'test',
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        sections: {},
-      },
+      ...meta,
       stopReason: 'endTurn',
-      timestamp: 0,
     },
   ] as unknown as AgentMessage[];
 }
@@ -152,7 +146,7 @@ function buildRoot(): AgentTrajectory {
 }
 
 describe('buildTrajectory', () => {
-  it('keeps the run context and raw transcript verbatim, unfiltered', () => {
+  it('keeps the contributing agents verbatim — raw transcript and run context — in sourceRecords', () => {
     const raw = transcript();
     const trajectory = buildTrajectory({
       agentId: 'root',
@@ -162,39 +156,72 @@ describe('buildTrajectory', () => {
       transcript: raw,
     });
 
-    expect(trajectory.context).toEqual(runContext);
-    expect(trajectory.transcript).toEqual(raw);
-    expect(trajectory.transcript[0]).toMatchObject({
-      role: 'system',
-      toolsAdded: [{ name: 'spawn_agent' }],
-    });
+    expect(trajectory.sourceRecords).toHaveLength(1);
+    const root = trajectory.sourceRecords?.[0];
+    if (!root) throw new Error('root source record missing');
+    expect(root.itemRef).toBe('root');
+    expect(root.task).toBe('find the bug');
+    expect(root.depth).toBe(0);
+    expect(root.context).toEqual(runContext);
+    expect(root.transcript).toEqual(raw);
   });
 
-  it('turns the transcript into lossless ordered steps with the child nested under its spawn step', () => {
+  it('flattens the child flow under its spawn call and links the definitions', () => {
     const trajectory = buildRoot();
 
-    expect(
-      trajectory.steps.map((s) => ('role' in s ? s.role : s.type)),
-    ).toEqual(['system', 'user', 'thinking', 'text', 'toolCall', 'text']);
-    const thinking = trajectory.steps[2] as ThinkingContent;
-    expect(thinking.thinking).toBe('deciding how to approach this');
-    const tool = trajectory.steps[4] as Extract<
-      TrajectoryStep,
-      { type: 'toolCall' }
-    >;
-    expect(tool.name).toBe('spawn_agent');
-    expect(tool.result).toBe('child summary');
-    expect(tool.child).toEqual(childTrajectory);
-    // nesting is deep: the grandchild lives inside the child's own steps
-    const childTool = tool.child?.steps[1] as Extract<
-      TrajectoryStep,
-      { type: 'toolCall' }
-    >;
-    expect(childTool.child?.agentId).toBe('dig');
-    expect(childTool.child?.depth).toBe(2);
+    // Definitions: root, its user input, the tool — then the child's.
+    expect(trajectory.definition.map((item) => item.id)).toEqual([
+      'root',
+      'user:root',
+      'tool:spawn_agent',
+      'explore',
+      'user:explore',
+    ]);
+    const explore = trajectory.definition[3];
+    expect(explore).toMatchObject({
+      type: 'llm',
+      parentAgentId: 'root',
+      spawnCallId: 'c1',
+    });
+
+    // Traces: the child's run sits between the spawn call and its result.
+    expect(trajectory.traces.map((t) => t.itemRef)).toEqual([
+      'root',
+      'user:root',
+      'root',
+      'user:explore',
+      'explore',
+      'tool:spawn_agent',
+      'root',
+    ]);
+    const spawnResult = trajectory.traces[5] as ToolTrajectoryTrace;
+    expect(spawnResult.output).toMatchObject({
+      tool_call_id: 'c1',
+      isError: false,
+      childItemRef: 'explore',
+    });
+
+    // Child source records are kept, with trace links re-offset.
+    const childRecords = trajectory.sourceRecords ?? [];
+    expect(childRecords).toHaveLength(3);
+    expect(childRecords[1]).toMatchObject({
+      itemRef: 'explore',
+      depth: 1,
+    });
+    expect(childRecords[1].traceMap).toEqual([
+      { transcriptIndex: 0, traceIndex: 3 },
+    ]);
+    expect(childRecords[2]).toMatchObject({
+      itemRef: 'dig',
+      depth: 2,
+      transcript: [],
+    });
+    expect(childRecords[2].traceMap).toEqual([
+      { transcriptIndex: 0, traceIndex: 4 },
+    ]);
   });
 
-  it('ignores children whose callId has no matching tool step', () => {
+  it('ignores children whose callId has no matching tool result', () => {
     const trajectory = buildTrajectory({
       agentId: 'root',
       task: 't',
@@ -204,34 +231,38 @@ describe('buildTrajectory', () => {
       children: new Map([['ghost-call', childTrajectory]]),
     });
 
-    for (const step of trajectory.steps) {
-      if (!('role' in step) && step.type === 'toolCall')
-        expect(step.child).toBeUndefined();
-    }
+    expect(trajectory.definition.map((item) => item.id)).toEqual([
+      'root',
+      'user:root',
+      'tool:spawn_agent',
+    ]);
+    expect(trajectory.traces).toHaveLength(5);
+    expect(trajectory.sourceRecords).toHaveLength(1);
   });
 });
 
 describe('renderTrajectory', () => {
-  it('indents nested agents by their depth and shows the system tool declarations', () => {
+  it('renders the flat flow: header, agents, tool calls, and results', () => {
     const rendered = renderTrajectory(buildRoot());
     const lines = rendered.split('\n');
 
-    expect(lines[0]).toMatch(/^\[depth 0\] root -- find the bug$/);
-    expect(rendered).toContain('[system] tools: spawn_agent');
-    expect(rendered).toContain('~ thinking: deciding how to approach this');
-    const childLine = lines.find((l) => l.includes('explore'));
-    expect(childLine).toMatch(/^ {2}\[depth 1\] explore/);
-    const grandchildLine = lines.find((l) => l.includes('dig'));
-    expect(grandchildLine).toMatch(/^ {4}\[depth 2\] dig/);
-    // child lines sit below the parent's spawn step, not at parent level
-    expect(rendered.indexOf('spawn_agent] child summary')).toBeLessThan(
-      rendered.indexOf('explore'),
+    expect(lines[0]).toBe('Flow: find the bug');
+    expect(lines).toContain('[root] [system] '); // system declarations kept
+    expect(lines).toContain('[user:root] > find the bug');
+    expect(lines).toContain('[root] delegating recon');
+    expect(lineFor(lines, '[tool spawn_agent')).toBeTruthy();
+    expect(lines).toContain('[tool:spawn_agent] [tool result] child summary');
+    expect(lines).toContain('[explore] digging');
+    expect(lines).toContain('[root] found it');
+    // the child run sits between the spawn call and its result
+    expect(rendered.indexOf('[explore] digging')).toBeLessThan(
+      rendered.indexOf('[tool:spawn_agent] [tool result] child summary'),
     );
   });
 });
 
 describe('TaskExecutor trajectory wiring', () => {
-  it('collects spawned children by callId and nests them in its own trajectory', async () => {
+  it('collects spawned children by callId and flattens them into its own trajectory', async () => {
     const raw = transcript();
     const spawnCalls: string[] = [];
     const spawn: SpawnHandler = async (input) => {
@@ -274,12 +305,19 @@ describe('TaskExecutor trajectory wiring', () => {
     const result = await agent.run();
 
     expect(spawnCalls).toEqual(['c1']);
-    expect(result.trajectory.context).toEqual(runContext);
-    expect(result.trajectory.transcript).toEqual(raw);
-    const tool = result.trajectory.steps.find(
-      (s): s is Extract<TrajectoryStep, { type: 'toolCall' }> =>
-        !('role' in s) && s.type === 'toolCall',
+    expect(result.trajectory.definition.map((item) => item.id)).toContain(
+      'explore',
     );
-    expect(tool?.child).toEqual(childTrajectory);
+    const spawnResult = result.trajectory.traces[5] as ToolTrajectoryTrace;
+    expect(spawnResult.output).toMatchObject({
+      tool_call_id: 'c1',
+      childItemRef: 'explore',
+    });
   });
 });
+
+// ------------------------------------------------------------------
+
+function lineFor(lines: string[], needle: string): string | undefined {
+  return lines.find((line) => line.includes(needle));
+}

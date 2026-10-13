@@ -8,6 +8,7 @@ import {
   type ToolRegistration,
 } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
+import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { createBuiltinModels } from './builtin-models.js';
 
 /** Context passed to every pi-durable call. */
@@ -54,6 +55,14 @@ export function installSpawnTool(tool: ToolRegistration): Promise<void> {
   openPromise ??= openHarness({});
   return openPromise.then(({ registry }) => {
     registry.install(defineExtension({ name: 'llmx.spawn', tools: [tool] }));
+  });
+}
+
+/** Installs (or replaces) pi-durable's coding tools (read/write/edit/bash) into the process-wide registry. */
+export function installCodingTools(): Promise<void> {
+  openPromise ??= openHarness({});
+  return openPromise.then(({ registry }) => {
+    registry.install(CodingTools);
   });
 }
 
