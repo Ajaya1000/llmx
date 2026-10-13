@@ -73,6 +73,7 @@ export class TaskExecutor {
     this.children = new Map();
     this.session = await this.repository.createSession({
       ...(this.cwd ? { cwd: this.cwd } : {}),
+      codingTools: true,
       agentContext: {
         agentId: this.agentId,
         depth: this.depth,

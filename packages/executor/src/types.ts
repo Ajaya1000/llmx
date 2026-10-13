@@ -1,12 +1,10 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import type { JsonObject } from '@earendil-works/pi-ai';
 import type {
-  JsonObject,
-  SystemMessage,
-  TextContent,
-  ThinkingContent,
-  ToolCall,
-  UserMessage,
-} from '@earendil-works/pi-ai';
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+} from 'openai/resources/chat/completions';
+import type { AgentDefinition } from './agent/agents.ts';
 import type {
   AgentSessionEvent,
   DurableAgentSession,
@@ -24,9 +22,9 @@ export type SessionMessage = AgentMessage;
 /** The mission a user hands to the system — one goal, one entry agent, shared environment. */
 export interface Mission {
   goal: string;
-  /** The agent that starts the mission; every further agent is spawned from a parent via a tool call. */
+  /** The entry agent: its roster id, or the definition handed over directly. */
   entry: {
-    name: string;
+    agent: string | AgentDefinition;
     task: string;
   };
   /** Environment properties passed down to every agent (see Environment). */
@@ -68,32 +66,93 @@ export interface AgentRunContext {
   instructions?: string;
 }
 
-/** One recorded step in an agent's run, in order — provider shapes, unchanged. */
-export type TrajectoryStep =
-  | SystemMessage
-  | UserMessage
-  | TextContent
-  | ThinkingContent
-  | (ToolCall & {
-      /** The executed tool's result text, filled from the toolResult message. */
-      result: string;
-      isError: boolean;
-      /** The spawned agent's full trajectory, when this step was a spawn_agent call that ran a child. */
-      child?: AgentTrajectory;
-    });
+export type ItemRef = string;
 
-/** Everything one agent did in its run — the node unit of the trajectory tree. */
-export interface AgentTrajectory {
-  agentId: string;
+// -- Trajectory definitions (what a flow is made of)
+
+export interface LlmTrajectoryDefinition {
+  id: ItemRef;
+  type: 'llm';
+  systemPrompt?: string;
+  description?: string;
+  model?: { provider: string; modelId: string };
+  tools: ChatCompletionTool[];
   task: string;
-  /** 0 for the entry agent; parent depth + 1 for spawned agents. Redundant with nesting, but makes flat rendering trivial. */
   depth: number;
-  /** The model-side context this agent ran with — the "tools given" record. */
+  /** Set on child flows: the spawning agent and the tool call that spawned it. */
+  parentAgentId?: string;
+  spawnCallId?: string;
+}
+
+export interface UserTrajectoryDefinition {
+  id: ItemRef;
+  type: 'user';
+  description?: string;
+  ownerAgentId: string;
+}
+
+export interface ToolTrajectoryDefinition {
+  id: ItemRef;
+  type: 'tool';
+  name: string;
+  description?: string;
+  params: unknown;
+  ownerAgentId: string;
+}
+
+export type TrajectoryDefinitionItem =
+  | LlmTrajectoryDefinition
+  | UserTrajectoryDefinition
+  | ToolTrajectoryDefinition;
+
+// -- Trajectory traces (the flat, chronological flow record)
+
+export interface LlmTrajectoryTrace {
+  itemRef: ItemRef;
+  message: ChatCompletionMessageParam;
+  /** The tool set after a mid-run system change. */
+  overridenTool?: ChatCompletionTool[];
+}
+
+export interface UserTrajectoryTrace {
+  itemRef: ItemRef;
+  message: string;
+}
+
+export interface ToolTrajectoryOutput {
+  tool_call_id: string;
+  content: unknown;
+  isError?: boolean;
+  /** The child flow's root llm definition, when this call spawned one. */
+  childItemRef?: string;
+}
+
+export interface ToolTrajectoryTrace {
+  itemRef: ItemRef;
+  output: ToolTrajectoryOutput;
+}
+
+export type TrajectoryTrace =
+  | LlmTrajectoryTrace
+  | UserTrajectoryTrace
+  | ToolTrajectoryTrace;
+
+/** Links a contributing agent's raw transcript to the flat trace list. */
+export interface TrajectorySourceRecord {
+  itemRef: ItemRef;
+  task: string;
+  depth: number;
   context: AgentRunContext;
-  /** The RAW transcript — every message verbatim, system messages included; nothing filtered, nothing flattened. */
   transcript: SessionMessage[];
-  /** The derived, lossless ordered step view (readability + rendering); `transcript` stays the source of truth. */
-  steps: TrajectoryStep[];
+  traceMap: Array<{ transcriptIndex: number; traceIndex: number }>;
+}
+
+/** Everything one flow did — OpenAI-shaped, flat, chronological; child flows are flattened into it. */
+export interface AgentTrajectory {
+  flow: string;
+  definition: TrajectoryDefinitionItem[];
+  traces: TrajectoryTrace[];
+  sourceRecords?: TrajectorySourceRecord[];
 }
 
 /** One agent's own run result — its final text is what the parent's spawn tool call receives. */

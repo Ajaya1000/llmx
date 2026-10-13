@@ -32,12 +32,10 @@ describe('durable sqlite storage (pi-durable)', () => {
       spawn: async () => ({
         text: 'child ran',
         trajectory: {
-          agentId: 'child',
-          task: 't',
-          depth: 1,
-          context: { tools: [] },
-          transcript: [],
-          steps: [],
+          flow: 't',
+          definition: [],
+          traces: [],
+          sourceRecords: [],
         },
       }),
     });
@@ -72,6 +70,35 @@ describe('durable sqlite storage (pi-durable)', () => {
 
     const agent = await session.conversation.agent(ctx);
     expect(agent.tools).toEqual([]);
+    await session.dispose();
+  });
+
+  it('offers the coding tools and records custom instructions when requested', async () => {
+    const models = createFakeModels();
+    const repository = new AgentSessionRepository();
+    const session = await repository.createSession({
+      harness: { storagePath, models },
+      instructions: 'You are the distiller.',
+      codingTools: true,
+    });
+
+    const agent = await session.conversation.agent(ctx);
+    expect(agent.tools.map((tool) => tool.name)).toEqual([
+      'read',
+      'write',
+      'edit',
+      'bash',
+    ]);
+
+    await session.prompt('distill it');
+    const runContext = session.getRunContext();
+    expect(runContext.instructions).toBe('You are the distiller.');
+    expect(runContext.tools.map((tool) => tool.name)).toEqual([
+      'read',
+      'write',
+      'edit',
+      'bash',
+    ]);
     await session.dispose();
   });
 
