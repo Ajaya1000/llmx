@@ -2,14 +2,14 @@
 
 The integration philosophy, in one breath:
 
-> **The client provides one recorded run — its trajectory (the step tree,
-> whatever shape its executor produced), the context store (definitions, read
-> & write), and a raw model call. Evolution distills the trajectory (an LLM
+> **The client provides one recorded flow — its trajectory (flow description,
+> referenced item definitions, and a flat ordered trace), the context store
+> (definitions, read & write), and a raw model call. Evolution distills the trajectory (an LLM
 > plus traditional code) into a smaller lossless view with explicit edges,
 > the wiki agent (another LLM) turns every response into structured rows,
 > and the wiki — persisted across runs — accumulates the knowledge.**
 > Integration surface = one module addition (the context store + the raw
-> model/harness seams) and one instance creation per run. Nothing more.
+> model/harness seams) and one instance creation per flow. Nothing more.
 
 `@llmx/evolution` is ports-only internally, but since the composition root
 (`Evolution`) ships in the package, a client never touches the wiring graph —
@@ -18,7 +18,7 @@ no registry, wiki, pinpointer, distiller, wiki agent, or loop construction.
 ```mermaid
 flowchart TB
     H["harness (client) — any executor"]
-    H -->|"one Trajectory (step tree, per run)"| EVO["Evolution (composition root)"]
+    H -->|"one Trajectory (flat flow trace)"| EVO["Evolution (composition root)"]
     H ---|"definitions: read / approved patches: write"| CS["context store (client-owned)"]
     M["raw model call (client) — the framework owns the prompts"]
     M -->|"judger: observing · wiki agent: row synthesis"| EVO
@@ -42,8 +42,9 @@ flowchart TB
 
 ## Two lifecycles, one wiki
 
-A `Trajectory` is **from a single run**; the **wiki** maintains knowledge
-across many runs through its persistence backend. The same `Evolution`
+A `Trajectory` represents **one complete flow**, potentially involving
+multiple agents; the **wiki** maintains knowledge across flows through its
+persistence backend. The same `Evolution`
 instance supports two operations: `maintain()` (idempotent — distills the
 run into the wiki once) and `run()` (re-entrant full pass — eval → evolve →
 gate). `run()` calls `maintain()` first, so calling it alone is always
@@ -85,7 +86,7 @@ What makes both work:
   is a no-op.
 - The wiki agent receives the response **plus the wiki's prior rows**, so it
   searches across runs for patterns, lessons, and failure reasons instead of
-  relaying one run's observations.
+  relaying one flow's observations.
 - The context registry re-derives from the context store (definitions —
   patches evolution wrote are immediately current) plus the trajectory's
   usage edges (each agent run → every tool it was offered).
@@ -99,14 +100,14 @@ What makes both work:
 
 ## The client contract — three things, total
 
-### 1. Provide one run's trajectory (usage) + own the context store (definitions)
+### 1. Provide one flow's trajectory + own the context store
 
-- **The trajectory** answers *what happened in this run* — one `Trajectory`
-  value: the agent's run as a step tree (user/system messages, assistant
-  text and thinking, tool calls with their results, spawned agents nested
-  under their spawn step). It is declared structurally in
-  `@llmx/evolution` (`trajectory.ts`) so whatever your executor produced
-  satisfies it — **no executor import in either direction**.
+- **The trajectory** answers *what happened in this flow* — one `Trajectory`
+  value with `flow`, `definition`, and chronological `traces`. LLM traces use
+  OpenAI Chat Completions messages; user and tool/code traces reference their
+  own definition items. Spawned-agent traces are flattened and linked by tool
+  call IDs. Original producer transcripts and run contexts remain in
+  `sourceRecords` when they contain data not represented by OpenAI messages.
 - **The context store** answers *what the contexts are* — the authoritative
   artifacts (agents, skills, tool docs), addressed by reference, in **read &
   write** mode. It's a three-method port the client implements over whatever
@@ -122,8 +123,7 @@ export class FileContextStore implements ContextStore {
   write(context) { /* persist the patched form — the ONLY write path */ }
 }
 
-// One recorded run, handed over as-is — your executor's trajectory value
-// satisfies the shape structurally (agentId, task, depth, context, steps).
+// One complete flow: description, item definitions, and flat ordered traces.
 const trajectory: Trajectory = missionResult.trajectory;
 ```
 
@@ -134,9 +134,8 @@ trajectory; the registry merges the two, and a context the store does not
 own is never a patch target.
 
 One id convention makes derivation work: a tool's context id is
-`tool:<name>` (the trajectory model derives it), and an agent's context id
-is its `agentId` — both must match the context store's references for a
-culprit to be patchable.
+`tool:<name>` and an agent's context id is its definition `id` — both must
+match the context store's references for a culprit to be patchable.
 
 ### 2. One module addition — the context store + the raw seams
 
@@ -169,7 +168,7 @@ The prompts themselves are maintained by the framework:
 
 - **The distiller** (`DefaultTrajectoryDistiller`) is an LLM plus traditional
   code: the traditional half projects the trajectory into a compact,
-  **lossless** view (every step kept, rendered contexts, and the implicit
+  **lossless** view (every trace kept, rendered contexts, and the implicit
   relations made explicit as edges — `spawned` ownership edges, `used`
   context-usage edges); the LLM half (`PromptedJudger`) observes that view and
   returns grounded observations under a strict JSON protocol (culprit refs
@@ -194,7 +193,7 @@ import {
 } from '@llmx/evolution';
 
 const result = await new Evolution({
-  trajectory,        // this run's step tree (usage)
+  trajectory,        // this flow's flat trace (usage)
   contexts,         // your ContextStore (definitions, read & write)
   model,            // raw model call — the framework writes the prompts
   runner,           // from your adapter module
@@ -228,7 +227,7 @@ the run distilled without evolving); `run()` performs the whole pass —
 
 | | Provided by |
 |---|---|
-| The run's `Trajectory` (step tree) | **you** — any executor's value, structural |
+| The flow's `Trajectory` (definition + flat traces) | **you** — any executor's value, structural |
 | Context definitions, read & write | **you** — `ContextStore` in the adapter module |
 | Raw model call (`ModelCall`), `RunRunner`, gate `decide` | **you** — one adapter module |
 | The distiller (view + edges, judging prompt) | evolution — framework-owned |
@@ -260,7 +259,7 @@ Two seams are deliberately unimplemented and marked `ponytail:` in the
 source: the `RunRunner`'s forked-run body (yours — it is your harness), and
 the proposer's patch *text* (the default proposes an empty patch; it will be
 framework-prompted over the same `ModelCall` when patch content matters).
-The distiller's view is untruncated by design (one model call per run);
+The distiller's view is untruncated by design (one model call per flow);
 window or stream it when real runs outgrow a single prompt. Everything else
 — the view + edges, pinpointing, wiki retention, eval derivation, verdict
 distillation, retry bounding, gating — runs on the provided defaults.

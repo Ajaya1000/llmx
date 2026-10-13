@@ -1,151 +1,328 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type {
+  AssistantMessage,
+  SystemMessage,
+  ToolResultMessage,
+  UserMessage,
+} from '@earendil-works/pi-ai';
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+} from 'openai/resources/chat/completions';
+import type {
   AgentRunContext,
   AgentTrajectory,
+  LlmTrajectoryDefinition,
   SessionMessage,
-  TrajectoryStep,
+  TrajectoryDefinitionItem,
+  TrajectoryTrace,
 } from '../types.ts';
 
 export interface BuildTrajectoryInput {
   agentId: string;
   task: string;
   depth: number;
-  /** The resolved run context — model, offered tools, instructions. */
+  flow?: string;
+  description?: string;
   context: AgentRunContext;
-  /** The RAW transcript, stored verbatim on the trajectory (nothing filtered). */
   transcript: SessionMessage[];
-  /** Spawned children keyed by the parent's spawn_agent tool callId. */
+  /** Child trajectories keyed by the parent tool-call id that spawned them. */
   children?: ReadonlyMap<string, AgentTrajectory>;
 }
 
-/**
- * Assembles one agent's trajectory: the run context and raw transcript
- * verbatim, plus a derived lossless step view. Child trajectories nest under
- * the exact spawn_agent tool step that produced them (matched by callId), so
- * nesting survives parallel tool calls.
- */
+/** Converts an executor transcript into OpenAI-shaped, flow-wide flat traces. */
 export function buildTrajectory(input: BuildTrajectoryInput): AgentTrajectory {
-  return {
-    agentId: input.agentId,
+  const llm: LlmTrajectoryDefinition = {
+    id: input.agentId,
+    type: 'llm',
+    systemPrompt: input.context.instructions,
+    description: input.description,
+    tools: input.context.tools.map(toOpenAiTool),
+    model: input.context.model,
     task: input.task,
     depth: input.depth,
-    context: input.context,
-    transcript: input.transcript,
-    steps: stepsFrom(input.transcript, input.children),
+  };
+  const definitions: TrajectoryDefinitionItem[] = [
+    llm,
+    {
+      id: userRef(input.agentId),
+      type: 'user',
+      description: `Input to ${input.agentId}`,
+      ownerAgentId: input.agentId,
+    },
+    ...input.context.tools.map((tool) => toolDefinition(tool, input.agentId)),
+  ];
+  const traces: TrajectoryTrace[] = [];
+  const traceMap: {
+    transcriptIndex: number;
+    traceIndex: number;
+  }[] = [];
+  const sourceRecords: NonNullable<AgentTrajectory['sourceRecords']>[number][] =
+    [
+      {
+        itemRef: input.agentId,
+        task: input.task,
+        depth: input.depth,
+        context: input.context,
+        transcript: input.transcript,
+        traceMap,
+      },
+    ];
+  const appendTrace = (trace: TrajectoryTrace, transcriptIndex: number) => {
+    traceMap.push({ transcriptIndex, traceIndex: traces.length });
+    traces.push(trace);
+  };
+  const definitionsById = new Map(definitions.map((item) => [item.id, item]));
+  const activeTools = new Map(
+    input.context.tools.map((tool) => [tool.name, toOpenAiTool(tool)]),
+  );
+  const toolNamesByCallId = new Map<string, string>();
+
+  for (const [messageIndex, message] of input.transcript.entries()) {
+    if (!isKnownMessage(message)) continue;
+    switch (message.role) {
+      case 'system': {
+        let changed = false;
+        for (const tool of message.toolsAdded ?? []) {
+          activeTools.set(tool.name, toOpenAiTool(tool));
+          addDefinition(definitionsById, toolDefinition(tool, input.agentId));
+          changed = true;
+        }
+        for (const removed of message.toolsRemoved ?? []) {
+          changed = activeTools.delete(removed.name) || changed;
+        }
+        const trace: TrajectoryTrace = {
+          itemRef: input.agentId,
+          message: { role: 'system', content: blocksToText(message.content) },
+          ...(changed ? { overridenTool: [...activeTools.values()] } : {}),
+        };
+        appendTrace(trace, messageIndex);
+        break;
+      }
+      case 'user':
+        appendTrace(
+          {
+            itemRef: userRef(input.agentId),
+            message: blocksToText(message.content),
+          },
+          messageIndex,
+        );
+        break;
+      case 'assistant': {
+        const toolCalls = message.content.filter(
+          (block) => block.type === 'toolCall',
+        );
+        for (const call of toolCalls) toolNamesByCallId.set(call.id, call.name);
+        const normalized: ChatCompletionMessageParam = {
+          role: 'assistant',
+          content: blocksToText(message.content) || null,
+          ...(toolCalls.length > 0
+            ? {
+                tool_calls: toolCalls.map((call) => ({
+                  id: call.id,
+                  type: 'function' as const,
+                  function: {
+                    name: call.name,
+                    arguments: JSON.stringify(call.arguments),
+                  },
+                })),
+              }
+            : {}),
+        };
+        appendTrace(
+          { itemRef: input.agentId, message: normalized },
+          messageIndex,
+        );
+        break;
+      }
+      case 'toolResult': {
+        const name =
+          message.toolName ??
+          toolNamesByCallId.get(message.toolCallId) ??
+          'unknown';
+        addDefinition(
+          definitionsById,
+          toolDefinition(
+            { name, description: '', parameters: {} },
+            input.agentId,
+          ),
+        );
+        const child = input.children?.get(message.toolCallId);
+        const childRoot = child ? rootLlm(child) : undefined;
+        if (child && childRoot) {
+          const childDefinitions = child.definition.map((definition) =>
+            definition.id === childRoot.id
+              ? {
+                  ...definition,
+                  parentAgentId: input.agentId,
+                  spawnCallId: message.toolCallId,
+                }
+              : definition,
+          );
+          for (const definition of childDefinitions)
+            addDefinition(definitionsById, definition);
+          const childTraceOffset = traces.length;
+          traces.push(...child.traces);
+          sourceRecords.push(
+            ...(child.sourceRecords ?? []).map((record) => ({
+              ...record,
+              traceMap: record.traceMap?.map((link) => ({
+                ...link,
+                traceIndex: link.traceIndex + childTraceOffset,
+              })),
+            })),
+          );
+        }
+        const output: Extract<TrajectoryTrace, { output: unknown }>['output'] =
+          {
+            tool_call_id: message.toolCallId,
+            content: message.content,
+            isError: message.isError,
+            ...(childRoot ? { childItemRef: childRoot.id } : {}),
+          };
+        appendTrace({ itemRef: toolRef(name), output }, messageIndex);
+        break;
+      }
+    }
+  }
+
+  return {
+    flow: input.flow ?? input.task,
+    definition: [...definitionsById.values()],
+    traces,
+    sourceRecords,
   };
 }
 
-/**
- * The ordered step view — lossless: system messages and every assistant block
- * (even empty text) survive verbatim; only a toolCall block gains its executed
- * result and the spawned child. `transcript` stays the source of truth.
- */
-function stepsFrom(
-  messages: readonly AgentMessage[],
-  children?: ReadonlyMap<string, AgentTrajectory>,
-): TrajectoryStep[] {
-  type ToolStep = Extract<TrajectoryStep, { type: 'toolCall' }>;
-  const steps: TrajectoryStep[] = [];
-  const toolSteps = new Map<string, ToolStep>();
-
-  for (const message of messages) {
-    switch (message.role) {
-      case 'system':
-      case 'user':
-        steps.push(message);
-        break;
-      case 'assistant':
-        for (const block of message.content) {
-          if (block.type === 'toolCall') {
-            const step: ToolStep = {
-              ...block,
-              result: '',
-              isError: false,
-            };
-            steps.push(step);
-            toolSteps.set(block.id, step);
-          } else {
-            steps.push(block);
-          }
-        }
-        break;
-      case 'toolResult': {
-        const step = toolSteps.get(message.toolCallId);
-        if (step) {
-          step.result = blocksToText(message.content);
-          step.isError = message.isError;
-        }
-        break;
-      }
-      default:
-        break; // unknown/custom roles stay in `transcript`, not `steps`
-    }
-  }
-
-  if (children) {
-    for (const [callId, child] of children) {
-      const step = toolSteps.get(callId);
-      if (step) step.child = child;
-    }
-  }
-
-  return steps;
-}
-
-/** One line per step, indented by nesting depth — nested runs are visually obvious. */
+/** Renders the flattened flow in trace order for logs and CLI output. */
 export function renderTrajectory(
   trajectory: AgentTrajectory,
   maxChars = 160,
 ): string {
-  const lines: string[] = [];
-
-  function emitNode(node: AgentTrajectory): void {
-    const pad = '  '.repeat(node.depth);
-    lines.push(
-      `${pad}[depth ${node.depth}] ${node.agentId} -- ${clip(node.task, maxChars)}`,
-    );
-    for (const step of node.steps) emitStep(step, pad);
-  }
-
-  function emitStep(step: TrajectoryStep, pad: string): void {
-    if ('role' in step) {
-      if (step.role === 'user') {
-        lines.push(`${pad}  > ${clip(blocksToText(step.content), maxChars)}`);
-      } else {
-        // system: the base prompt / tool declarations the model was offered
-        const tools = (step.toolsAdded ?? []).map((tool) => tool.name);
-        const what =
-          tools.length > 0
-            ? `tools: ${tools.join(', ')}`
-            : clip(blocksToText(step.content), maxChars);
-        lines.push(`${pad}  [system] ${what}`);
+  const lines: string[] = [`Flow: ${clip(trajectory.flow, maxChars)}`];
+  for (const trace of trajectory.traces) {
+    if ('message' in trace && typeof trace.message === 'object') {
+      const message = trace.message;
+      if (message.role === 'assistant') {
+        const text = blocksToText(message.content ?? '');
+        lines.push(
+          `[${trace.itemRef}] ${clip(text, maxChars)}`.trimEnd(),
+          ...(message.tool_calls ?? []).map(
+            (call) =>
+              `[${trace.itemRef}] [tool ${call.type === 'function' ? call.function.name : call.custom.name}]`,
+          ),
+        );
+      } else if (message.role === 'system') {
+        lines.push(
+          `[${trace.itemRef}] [system] ${clip(blocksToText(message.content), maxChars)}`,
+        );
       }
-    } else if (step.type === 'text') {
-      lines.push(`${pad}  ${clip(step.text, maxChars)}`);
-    } else if (step.type === 'thinking') {
-      lines.push(`${pad}  ~ thinking: ${clip(step.thinking, maxChars)}`);
-    } else {
-      const flag = step.isError ? ' (error)' : '';
+      continue;
+    }
+    if ('message' in trace && typeof trace.message === 'string') {
+      lines.push(`[${trace.itemRef}] > ${clip(trace.message, maxChars)}`);
+      continue;
+    }
+    const definition = trajectory.definition.find(
+      (item) => item.id === trace.itemRef,
+    );
+    if ('output' in trace && definition?.type === 'tool') {
+      const output = trace.output as {
+        tool_call_id?: string;
+        content?: unknown;
+      };
       lines.push(
-        `${pad}  [tool ${step.name}${flag}] ${clip(step.result, maxChars)}`,
+        `[${trace.itemRef}] [tool result] ${clip(blocksToText(output.content), maxChars)}`,
       );
-      if (step.child) emitNode(step.child);
     }
   }
-
-  emitNode(trajectory);
   return lines.join('\n');
 }
 
-function blocksToText(
-  content: string | ReadonlyArray<{ type: string; text?: string }>,
-): string {
+function rootLlm(
+  trajectory: AgentTrajectory,
+): LlmTrajectoryDefinition | undefined {
+  return trajectory.definition.find(
+    (definition): definition is LlmTrajectoryDefinition =>
+      definition.type === 'llm' && definition.parentAgentId === undefined,
+  );
+}
+
+function isKnownMessage(
+  message: AgentMessage,
+): message is
+  | SystemMessage
+  | UserMessage
+  | AssistantMessage
+  | ToolResultMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'role' in message &&
+    ['system', 'user', 'assistant', 'toolResult'].includes(message.role)
+  );
+}
+
+function toOpenAiTool(tool: {
+  name: string;
+  description: string;
+  parameters: unknown;
+}): ChatCompletionTool {
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters as Record<string, unknown>,
+    },
+  };
+}
+
+function toolDefinition(
+  tool: { name: string; description: string; parameters: unknown },
+  ownerAgentId: string,
+): TrajectoryDefinitionItem {
+  return {
+    id: toolRef(tool.name),
+    type: 'tool',
+    name: tool.name,
+    description: tool.description,
+    params: tool.parameters,
+    ownerAgentId,
+  };
+}
+
+function addDefinition(
+  definitions: Map<string, TrajectoryDefinitionItem>,
+  definition: TrajectoryDefinitionItem,
+): void {
+  if (!definitions.has(definition.id))
+    definitions.set(definition.id, definition);
+}
+
+function blocksToText(content: unknown): string {
   if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
   return content
-    .filter((b) => b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text as string)
-    .join('\n')
-    .trim();
+    .filter(
+      (block): block is { type: 'text'; text: string } =>
+        typeof block === 'object' &&
+        block !== null &&
+        'type' in block &&
+        block.type === 'text' &&
+        'text' in block &&
+        typeof block.text === 'string',
+    )
+    .map((block) => block.text)
+    .join('\n');
+}
+
+function userRef(agentId: string): string {
+  return `user:${agentId}`;
+}
+
+function toolRef(name: string): string {
+  return `tool:${name}`;
 }
 
 function clip(text: string, maxChars: number): string {

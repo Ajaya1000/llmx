@@ -6,7 +6,7 @@
 
 # Part I — HLD (minimal)
 
-**Purpose:** a recorded agent run that self-improves by distilling, wikifying,
+**Purpose:** a recorded agent flow that self-improves by distilling, wikifying,
 blaming, and patching.
 
 **Components** (one line each):
@@ -15,7 +15,7 @@ blaming, and patching.
 |---|---|
 | Agent | runnable — executes a task with its own instructions + tools |
 | Skill | non-runnable context attached to an agent's prompt |
-| Trajectory | one run's step tree — what the client's executor produced, handed over as-is |
+| Trajectory | one flow definition plus a flat, ordered trace referencing its LLM, user, tool, and code items |
 | Distiller | LLM + traditional code — reduces the trajectory to a compact, lossless view with explicit edges, observes it |
 | Wiki agent | LLM — turns distilled responses (+ prior rows) into structured rows: patterns, lessons, failure reasons |
 | Wiki | curated, time-framed, bounded memory of rows, persisted across runs |
@@ -31,7 +31,7 @@ blaming, and patching.
 
 ```mermaid
 flowchart TB
-    TR[One run's Trajectory] --> D[Distiller: view + edges + observations]
+    TR[One flow's Trajectory] --> D[Distiller: view + edges + observations]
     D -->|DistilledRun| WA[Wiki agent]
     WK[Wiki, cross-run] -->|prior rows| WA
     WA -->|structured rows| WK
@@ -67,7 +67,7 @@ flowchart TB
 
     subgraph core["Evolution framework"]
         RT["Agent runtime (client)"]
-        TR["Trajectory (one run, step tree)"]
+        TR["Trajectory (flow definition + flat trace)"]
         D["Distiller (LLM + traditional code)"]
         WA["Wiki agent (LLM)"]
         W["Wiki"]
@@ -86,7 +86,7 @@ flowchart TB
         CX["Contexts (tools · skills · agents.md)"]
     end
 
-    RT -->|"1. one run's trajectory, as produced"| TR
+    RT -->|"1. flow trajectory, as produced"| TR
     TR -->|"2. compact lossless view + edges"| D
     D -->|"3. observations (grounded)"| WA
     W -->|"prior rows"| WA
@@ -109,20 +109,27 @@ classDiagram
     direction LR
 
     class Trajectory {
-        <<one run — the node unit of the step tree>>
-        +agentId Ref
-        +task string
-        +depth number
-        +context RunContext
-        +steps TrajectoryStep[]
+        <<flow definition and chronological trace>>
+        +flow string
+        +definition DefinitionItem[]
+        +traces TrajectoryTrace[]
+        +sourceRecords SourceRecord[]
     }
 
-    class TrajectoryStep {
-        <<lossless ordered step view>>
-        role user/system · content
-        type text/thinking · text
-        type toolCall · name, arguments, result, isError
-        child Trajectory (spawned run)
+    class DefinitionItem {
+        +id Ref
+        +type llm/user/tool/code
+        +systemPrompt string
+        +description string
+        +tools ChatCompletionTool[]
+        +params object
+    }
+
+    class TrajectoryTrace {
+        +itemRef Ref
+        +overridenTool ChatCompletionTool[]
+        +message OpenAI Chat Completions message
+        +output object
     }
 
     class RunView {
@@ -182,7 +189,10 @@ classDiagram
         +createdAt number
     }
 
-    Trajectory --> TrajectoryStep : contains (children nest under spawn steps)
+    Trajectory --> DefinitionItem : defines referenced items
+    Trajectory --> TrajectoryTrace : contains in flow order
+    TrajectoryTrace --> DefinitionItem : itemRef
+    TrajectoryTrace --> TrajectoryTrace : tool-call output links spawned agent
     RunView --> Trajectory : projects (losslessly)
     WikiRow --> RunView : references (runId, stepRef)
     WikiRow --> Blame : materializes
@@ -193,13 +203,15 @@ classDiagram
 
 Key relations:
 
-- A `Trajectory` is **from a single run**; the wiki maintains knowledge
-  across runs. Ownership is the nesting (a spawned run under its spawn
-  step); step refs (`toolCall` id, else `agentId:position`) are the stable
-  handles every edge and row hangs off.
+- A `Trajectory` is **one complete flow**, potentially involving multiple
+  agents. Its flat traces reference definitions by `itemRef`; spawned-agent
+  relationships are derived from tool-call IDs and child item references.
+  Trace refs use tool-call IDs for tool outputs and stable flow positions for
+  other messages.
 - A `RunView` is smaller than the trajectory but **loses nothing** — every
-  step kept, rendered contexts (instructions + offered tools) included, the
-  implicit relations (`spawned`, `used`) made explicit as edges.
+  trace kept, rendered contexts (instructions + offered tools) included, the
+  implicit relations (`spawned`, `used`) made explicit as edges. Original
+  producer records remain available in the trajectory's `sourceRecords`.
 - A `WikiRow` **references** the run (`runId`, optional `stepRef`); it never
   embeds the trajectory. `culprit.kind` is the context kind to patch:
   `tool` / `skill` / `agent`.
@@ -295,7 +307,7 @@ sequenceDiagram
     H-->>A: approved diff for tool, skill, or agent.md context
 ```
 
-## 5. Retention — the wiki stays small, the trajectory stays with the run
+## 5. Retention — the wiki stays small, the trajectory stays with the flow
 
 The wiki's purpose is **context**, not archive, so it is bounded:
 

@@ -33,3 +33,130 @@ The harness is a process-wide singleton, so installing the spawn extension binds
 - [ADR-0002](./002-taskmanager-recursive-execution.md) — execution history, one session per executor
 - [ADR-0003](./003-pi-durable-task-graph-substrate.md) — the durable substrate
 - [Evolution framework HLD/LLD](../architecture/evolution-framework.md) — what consumes this
+
+```json
+{
+  "agentId": "agent:writer",
+  "task": "Draft the quarterly harbor report",
+  "depth": 0,
+  "context": {
+    "model": {
+      "provider": "openai",
+      "modelId": "gpt-4o-mini"
+    },
+    "tools": [
+      {
+        "name": "search_docs",
+        "description": "Full-text search over the harbor archive.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string" },
+            "limit": { "type": "number", "default": 5 }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "spawn_editor",
+        "description": "Spawn a child editor agent to revise a draft.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "draft": { "type": "string" }
+          },
+          "required": ["draft"]
+        }
+      }
+    ],
+    "instructions": "You are a careful harbor writer. Verify every claim against the archive."
+  },
+  "steps": [
+    {
+      "role": "system",
+      "content": "You are a careful harbor writer. Verify every claim against the archive."
+    },
+    {
+      "role": "system",
+      "content": [
+        { "type": "text", "text": "Mid-run update: tide-table tool is now available." },
+        { "type": "image" }
+      ],
+      "toolsAdded": [
+        {
+          "name": "tide_table",
+          "description": "Look up tide times by date.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "date": { "type": "string", "format": "date" }
+            },
+            "required": ["date"]
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Write the Q3 summary, keep it under 200 words." }
+      ]
+    },
+    {
+      "type": "thinking",
+      "thinking": "I should search the archive for Q3 events before drafting."
+    },
+    {
+      "type": "toolCall",
+      "id": "call_01",
+      "name": "search_docs",
+      "arguments": { "query": "harbor Q3 events", "limit": 3, "exact": false, "tags": ["q3", "events"], "boost": null },
+      "result": "Found 3 entries: regatta (Jul 12), pier repair (Aug 4), night market (Sep 19).",
+      "isError": false
+    },
+    {
+      "type": "toolCall",
+      "id": "call_02",
+      "name": "tide_table",
+      "arguments": { "date": "2026-13-40" },
+      "result": "Invalid date: month 13 out of range.",
+      "isError": true
+    },
+    {
+      "type": "text",
+      "text": "Draft: Q3 saw the regatta, pier repairs, and a record night market."
+    },
+    {
+      "type": "toolCall",
+      "id": "call_03",
+      "name": "spawn_editor",
+      "arguments": { "draft": "Q3 saw the regatta, pier repairs, and a record night market." },
+      "result": "Editor revised the draft.",
+      "isError": false,
+      "child": {
+        "agentId": "agent:editor",
+        "task": "Revise the Q3 draft",
+        "depth": 1,
+        "context": {
+          "tools": [],
+          "instructions": "You are a terse editor. Fix grammar only."
+        },
+        "steps": [
+          {
+            "role": "system",
+            "content": "You are a terse editor. Fix grammar only."
+          },
+          {
+            "role": "user",
+            "content": "Revise: Q3 saw the regatta, pier repairs, and a record night market."
+          },
+          {
+            "type": "text",
+            "text": "Revised: Q3 featured the regatta, pier repairs, and a record night market."
+          }
+        ]
+      }
+    }
+  ]
+}
+```

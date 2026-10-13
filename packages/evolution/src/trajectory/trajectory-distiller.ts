@@ -1,16 +1,19 @@
 import type { ModelCall } from '../ports.ts';
+import type { Ref } from '../types.ts';
+import type { Culprit } from '../wiki/wiki-types.ts';
 import {
   allRuns,
   type RenderedContext,
   renderedContexts,
+  rootAgent,
   type StepKind,
   stepKind,
   stepText,
   type Trajectory,
+  toolCallDetails,
+  toolResultDetails,
   walkTrajectory,
 } from './trajectory.ts';
-import type { Ref } from '../types.ts';
-import type { Culprit } from '../wiki/wiki-types.ts';
 
 /** One compact, lossless step of the distilled view. */
 export interface ViewStep {
@@ -105,35 +108,51 @@ export class DefaultTrajectoryDistiller implements TrajectoryDistiller {
 export function buildRunView(trajectory: Trajectory): RunView {
   const contexts = new Map<Ref, RenderedContext>();
   const edges: ViewEdge[] = [];
-  for (const run of allRuns(trajectory)) {
-    for (const context of renderedContexts(run)) {
+  for (const agent of allRuns(trajectory)) {
+    for (const context of renderedContexts(trajectory, agent.id)) {
       if (!contexts.has(context.id)) contexts.set(context.id, context);
       if (context.kind === 'tool')
-        edges.push({ from: run.agentId, to: context.id, kind: 'used' });
+        edges.push({ from: agent.id, to: context.id, kind: 'used' });
     }
-    for (const step of run.steps)
-      if ('type' in step && step.type === 'toolCall' && step.child)
-        edges.push({ from: step.id, to: step.child.agentId, kind: 'spawned' });
   }
 
+  const entries = walkTrajectory(trajectory);
+  for (const entry of entries) {
+    if (!('output' in entry.trace) || !isObject(entry.trace.output)) continue;
+    const childItemRef = entry.trace.output.childItemRef;
+    if (typeof childItemRef === 'string')
+      edges.push({ from: entry.ref, to: childItemRef, kind: 'spawned' });
+  }
+
+  const root = rootAgent(trajectory);
   return {
-    runId: trajectory.agentId,
-    task: trajectory.task,
+    runId: root?.id ?? 'flow',
+    task: trajectory.flow,
     contexts: [...contexts.values()],
-    steps: walkTrajectory(trajectory).map((entry) => ({
-      ref: entry.ref,
-      agentId: entry.run.agentId,
-      kind: stepKind(entry.step),
-      text: stepText(entry.step),
-      tool:
-        'type' in entry.step && entry.step.type === 'toolCall'
+    steps: entries.map((entry) => {
+      const toolResult = toolResultDetails(trajectory, entry.trace);
+      const toolCall = toolCallDetails(entry.trace)[0];
+      const tool = toolResult
+        ? {
+            name: toolResult.name,
+            arguments: toolResult.arguments,
+            isError: toolResult.isError,
+          }
+        : toolCall
           ? {
-              name: entry.step.name,
-              arguments: JSON.stringify(entry.step.arguments),
-              isError: entry.step.isError,
+              name: toolCall.name,
+              arguments: toolCall.arguments,
+              isError: false,
             }
-          : undefined,
-    })),
+          : undefined;
+      return {
+        ref: entry.ref,
+        agentId: entry.agentId,
+        kind: stepKind(entry.trace, trajectory),
+        text: stepText(entry.trace),
+        tool,
+      };
+    }),
     edges,
   };
 }
@@ -260,6 +279,10 @@ function validCulprit(
     kind: culprit.kind as Culprit['kind'],
     ref: culprit.ref,
   };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function extractArray(output: string): string {

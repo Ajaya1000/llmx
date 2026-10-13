@@ -1,210 +1,435 @@
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionUserMessageParam,
+} from 'openai/resources/chat/completions';
 import type { ContextKind, Ref } from '../types.ts';
 
-/**
- * The trajectory model — what one agent run looked like from the model's
- * side, as a step tree. Structurally compatible with an executor's step
- * view: any runtime that produces these shapes satisfies it. This package
- * never imports an executor — the shapes are declared here, once, and stay
- * ours. The raw transcript stays with the producing runtime; the ordered
- * step view is the lossless unit evolution consumes.
- */
+export type {
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionUserMessageParam,
+};
 
-/** A JSON object value — opaque to evolution beyond being JSON. */
-export type JSONValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JSONObject
-  | JSONArray;
-
-export interface JSONObject {
-  [key: string]: JSONValue;
-}
-
-export interface JSONArray extends Array<JSONValue> {}
-
-/** A tool exactly as the model was offered it — its declaration. */
-export interface ToolDescription {
-  name: string;
-  description: string;
-  /** The tool's parameter schema (typebox / JSON); opaque to evolution. */
-  parameters: unknown;
-}
-
-/** The resolved model-side context one agent ran with — the "tools given" record. */
-export interface RunContext {
+export interface LlmDefinition {
+  id: Ref;
+  type: 'llm';
+  systemPrompt?: string;
+  description?: string;
+  tools: readonly ChatCompletionTool[];
   model?: { provider: string; modelId: string };
-  /** Every tool offered to the model, in offer order. */
-  tools: readonly ToolDescription[];
-  /** The agent's instructions (system prompt text), when set. */
-  instructions?: string;
 }
 
-/** Any content block; only `text` blocks carry searchable text. */
-export interface ContentBlock {
-  type: string;
-  text?: string;
+export interface UserDefinition {
+  id: Ref;
+  type: 'user';
+  description?: string;
 }
 
-/** One recorded step of a run, in order — the unit every derivation reads. */
-export type TrajectoryStep =
-  | {
-      role: 'system';
-      content: string | readonly ContentBlock[];
-      /** Tools that became available at this point (mid-run additions). */
-      toolsAdded?: readonly ToolDescription[];
-    }
-  | { role: 'user'; content: string | readonly ContentBlock[] }
-  | { type: 'text'; text: string }
-  | { type: 'thinking'; thinking: string }
-  | {
-      type: 'toolCall';
-      id: string;
-      name: string;
-      arguments: JSONObject;
-      /** The executed tool's result text. */
-      result: string;
-      isError: boolean;
-      /** The spawned agent's full trajectory, when this step spawned a child. */
-      child?: Trajectory;
-    };
+export interface ToolDefinition {
+  id: Ref;
+  type: 'tool';
+  name: string;
+  description?: string;
+  params: unknown;
+}
 
-/** Everything one agent did in its run — the node unit of the trajectory tree. */
+export interface CodeDefinition {
+  id: Ref;
+  type: 'code';
+  description?: string;
+  params?: unknown;
+}
+
+export type DefinitionItem =
+  | LlmDefinition
+  | UserDefinition
+  | ToolDefinition
+  | CodeDefinition;
+
+export interface LlmTrace {
+  itemRef: Ref;
+  overridenTool?: readonly ChatCompletionTool[];
+  message: ChatCompletionMessageParam;
+}
+
+export interface UserTrace {
+  itemRef: Ref;
+  message: string | ChatCompletionUserMessageParam;
+}
+
+export interface ToolTrace {
+  itemRef: Ref;
+  output: {
+    tool_call_id: string;
+    content: unknown;
+    isError?: boolean;
+    childItemRef?: Ref;
+  };
+}
+
+export interface CodeTrace {
+  itemRef: Ref;
+  output: unknown;
+}
+
+export type TrajectoryTrace = LlmTrace | UserTrace | ToolTrace | CodeTrace;
+
+/** One complete flow: definition items plus their chronological trace. */
 export interface Trajectory {
-  /** Who ran — the producer of every step in this node (the agent context ref). */
-  agentId: Ref;
-  task: string;
-  /** 0 for the entry agent; parent depth + 1 for spawned agents. */
-  depth: number;
-  /** The model-side context this agent ran with. */
-  context: RunContext;
-  /** The ordered, lossless step view. */
-  steps: readonly TrajectoryStep[];
+  flow: string;
+  definition: readonly DefinitionItem[];
+  traces: readonly TrajectoryTrace[];
 }
 
-/** The coarse kind of a step — the distiller's view and pinpointing share it. */
-export type StepKind = 'user' | 'system' | 'text' | 'thinking' | 'tool';
+export type StepKind = 'user' | 'system' | 'assistant' | 'tool' | 'code';
 
-/** The kind of one step. */
-export function stepKind(step: TrajectoryStep): StepKind {
-  if ('role' in step) return step.role === 'system' ? 'system' : 'user';
-  if (step.type === 'text') return 'text';
-  if (step.type === 'thinking') return 'thinking';
-  return 'tool';
-}
-
-/** Stable ref for a step: tool calls keep their call id, others take their
- * position (`agentId:index`). Every derived edge hangs off these. */
-export function stepRef(run: Trajectory, index: number): Ref {
-  const step = run.steps[index];
-  return step && 'type' in step && step.type === 'toolCall'
-    ? step.id
-    : `${run.agentId}:${index}`;
-}
-
-/** A context as actually rendered into one run — what the model was shown. */
 export interface RenderedContext {
   id: Ref;
   kind: ContextKind;
   content: string;
 }
 
-/** The contexts one run rendered: the agent's own instructions plus every
- * tool offered to it (run context + mid-run additions). */
-export function renderedContexts(run: Trajectory): RenderedContext[] {
-  const out: RenderedContext[] = [
-    {
-      id: run.agentId,
-      kind: 'agent',
-      content: run.context.instructions ?? '',
-    },
-  ];
-  for (const tool of toolsOffered(run))
-    out.push({
-      id: toolRef(tool.name),
-      kind: 'tool',
-      content: tool.description,
-    });
-  return out;
-}
-
-/** A step met while walking the tree, with its producing run and ownership chain. */
 export interface TrajectoryEntry {
-  /** The run whose steps produced this step. */
-  run: Trajectory;
-  /** Ancestor agent ids of `run`, nearest parent first. */
+  agentId: Ref;
   ancestors: readonly Ref[];
-  /** The step itself. */
-  step: TrajectoryStep;
-  /** Stable ref of the step (see `stepRef`). */
+  trace: TrajectoryTrace;
   ref: Ref;
-  /** The step's position within its run. */
   index: number;
 }
 
-/**
- * Pre-order walk of the trajectory tree: a run's steps in order, each
- * spawned child expanded right after its spawn step. This is the
- * chronological analog of record insertion order — the order fact matching
- * (`firstIntroduction`) trusts.
- */
-export function walkTrajectory(root: Trajectory): TrajectoryEntry[] {
-  const entries: TrajectoryEntry[] = [];
-  const walk = (run: Trajectory, ancestors: readonly Ref[]): void => {
-    run.steps.forEach((step, index) => {
-      entries.push({ run, ancestors, step, ref: stepRef(run, index), index });
-      if ('type' in step && step.type === 'toolCall' && step.child)
-        walk(step.child, [run.agentId, ...ancestors]);
+export interface ToolCallDetails {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+export interface ToolResultDetails {
+  callId: string;
+  name: string;
+  arguments: string;
+  content: string;
+  isError: boolean;
+}
+
+export function definitionFor(
+  trajectory: Trajectory,
+  itemRef: Ref,
+): DefinitionItem | undefined {
+  return trajectory.definition.find((item) => item.id === itemRef);
+}
+
+export function assertTrajectoryIntegrity(trajectory: Trajectory): void {
+  const definitions = new Map<Ref, DefinitionItem>();
+  for (const definition of trajectory.definition) {
+    if (definitions.has(definition.id))
+      throw new Error(`Duplicate trajectory definition id: ${definition.id}`);
+    definitions.set(definition.id, definition);
+  }
+  for (const [index, trace] of trajectory.traces.entries()) {
+    const definition = definitions.get(trace.itemRef);
+    if (!definition)
+      throw new Error(
+        `Trace ${index} references missing definition: ${trace.itemRef}`,
+      );
+    const valid =
+      definition.type === 'llm'
+        ? 'message' in trace && typeof trace.message !== 'string'
+        : definition.type === 'user'
+          ? 'message' in trace &&
+            (typeof trace.message === 'string' ||
+              (typeof trace.message === 'object' &&
+                trace.message !== null &&
+                trace.message.role === 'user'))
+          : definition.type === 'tool'
+            ? 'output' in trace && isToolOutput(trace.output)
+            : 'output' in trace;
+    if (!valid)
+      throw new Error(
+        `Trace ${index} is incompatible with ${definition.type} item ${definition.id}`,
+      );
+  }
+}
+
+export function rootAgent(trajectory: Trajectory): LlmDefinition | undefined {
+  const children = new Set(
+    trajectory.traces.flatMap((trace) =>
+      'output' in trace && isToolOutput(trace.output) && trace.output.childItemRef
+        ? [trace.output.childItemRef]
+        : [],
+    ),
+  );
+  return trajectory.definition.find(
+    (item): item is LlmDefinition =>
+      item.type === 'llm' && !children.has(item.id),
+  );
+}
+
+export function stepKind(
+  trace: TrajectoryTrace,
+  trajectory: Trajectory,
+): StepKind {
+  const definition = definitionFor(trajectory, trace.itemRef);
+  if (!definition) return 'assistant';
+  if (definition.type === 'llm') {
+    return 'message' in trace &&
+      typeof trace.message === 'object' &&
+      trace.message !== null &&
+      'role' in trace.message &&
+      trace.message.role === 'system'
+      ? 'system'
+      : 'assistant';
+  }
+  if (definition.type === 'user') return 'user';
+  return definition.type;
+}
+
+/** Stable trace reference: tool outputs use their OpenAI tool-call id. */
+export function stepRef(trajectory: Trajectory, index: number): Ref {
+  const trace = trajectory.traces[index];
+  if (trace && 'output' in trace && isToolOutput(trace.output))
+    return trace.output.tool_call_id;
+  const owner = trace
+    ? owningAgent(trajectory, trace, index)
+    : rootAgent(trajectory)?.id;
+  return `${owner ?? 'flow'}:${index}`;
+}
+
+export function renderedContexts(
+  trajectory: Trajectory,
+  agentId: Ref,
+): RenderedContext[] {
+  const agent = definitionFor(trajectory, agentId);
+  if (agent?.type !== 'llm') return [];
+  const contexts: RenderedContext[] = [
+    {
+      id: agent.id,
+      kind: 'agent',
+      content: agent.systemPrompt ?? '',
+    },
+  ];
+  const byId = new Map<Ref, RenderedContext>();
+  for (const tool of toolsOffered(trajectory, agentId)) {
+    const name = chatToolName(tool);
+    const id = toolRef(name);
+    byId.set(id, {
+      id,
+      kind: 'tool',
+      content: chatToolDescription(tool),
     });
-  };
-  walk(root, []);
-  return entries;
+  }
+  return [...contexts, ...byId.values()];
 }
 
-/**
- * The searchable text of one step: user/system text, assistant text,
- * thinking, and tool results — the facts a run actually produced or consumed.
- */
-export function stepText(step: TrajectoryStep): string {
-  if ('role' in step) return blocksToText(step.content);
-  if (step.type === 'text') return step.text;
-  if (step.type === 'thinking') return step.thinking;
-  return step.result;
+/** Flat chronological walk; agent relationships come from linked tool outputs. */
+export function walkTrajectory(trajectory: Trajectory): TrajectoryEntry[] {
+  return trajectory.traces.map((trace, index) => {
+    const agentId = owningAgent(trajectory, trace, index) ?? trace.itemRef;
+    return {
+      agentId,
+      ancestors: ancestorsOf(trajectory, agentId),
+      trace,
+      ref: stepRef(trajectory, index),
+      index,
+    };
+  });
 }
 
-/** Every run node in the tree, root first, then per spawn order. */
-export function allRuns(root: Trajectory): Trajectory[] {
-  const runs: Trajectory[] = [root];
-  for (const step of root.steps)
-    if ('type' in step && step.type === 'toolCall' && step.child)
-      runs.push(...allRuns(step.child));
-  return runs;
+export function stepText(trace: TrajectoryTrace): string {
+  if ('message' in trace) {
+    if (typeof trace.message === 'string') return trace.message;
+    if (typeof trace.message !== 'object' || trace.message === null) return '';
+    if (trace.message.role === 'assistant') {
+      const content = contentText(trace.message.content);
+      const calls = (trace.message.tool_calls ?? []).map((call) =>
+        call.type === 'function'
+          ? `${call.function.name} ${call.function.arguments}`
+          : `${call.custom.name} ${call.custom.input}`,
+      );
+      const legacyCall = trace.message.function_call;
+      return [
+        content,
+        trace.message.refusal ?? '',
+        ...(legacyCall ? [`${legacyCall.name} ${legacyCall.arguments}`] : []),
+        ...calls,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+    return contentText(trace.message.content);
+  }
+  if ('output' in trace) {
+    const output = trace.output;
+    if (typeof output === 'object' && output !== null && 'content' in output)
+      return contentText(output.content);
+    return contentText(output);
+  }
+  return '';
 }
 
-/** Every tool offered during the run: the run context plus mid-run
- * additions, deduplicated by name — first offer wins. */
-export function toolsOffered(run: Trajectory): ToolDescription[] {
-  const byName = new Map<string, ToolDescription>();
-  for (const tool of run.context.tools) byName.set(tool.name, tool);
-  for (const step of run.steps)
-    if ('role' in step && step.role === 'system' && step.toolsAdded)
-      for (const tool of step.toolsAdded)
-        if (!byName.has(tool.name)) byName.set(tool.name, tool);
-  return [...byName.values()];
+export function allRuns(trajectory: Trajectory): LlmDefinition[] {
+  return trajectory.definition.filter(
+    (item): item is LlmDefinition => item.type === 'llm',
+  );
 }
 
-/** Context ref for a tool, by the id convention (`tool:<name>`; agents are
- * their own ref — the `agentId`). */
+export function toolsOffered(
+  trajectory: Trajectory,
+  agentId: Ref,
+): ChatCompletionTool[] {
+  const agent = definitionFor(trajectory, agentId);
+  if (agent?.type !== 'llm') return [];
+  const offered = new Map<string, ChatCompletionTool>();
+  for (const tool of agent.tools) offered.set(chatToolName(tool), tool);
+  for (const trace of trajectory.traces) {
+    if (
+      trace.itemRef === agentId &&
+      'message' in trace &&
+      'overridenTool' in trace &&
+      trace.overridenTool
+    ) {
+      for (const tool of trace.overridenTool)
+        if (!offered.has(chatToolName(tool)))
+          offered.set(chatToolName(tool), tool);
+    }
+  }
+  return [...offered.values()];
+}
+
 export function toolRef(name: string): Ref {
   return `tool:${name}`;
 }
 
-function blocksToText(content: string | readonly ContentBlock[]): string {
+export function toolCallDetails(trace: TrajectoryTrace): ToolCallDetails[] {
+  if (
+    !('message' in trace) ||
+    typeof trace.message !== 'object' ||
+    trace.message === null ||
+    trace.message.role !== 'assistant'
+  )
+    return [];
+  return (trace.message.tool_calls ?? []).map((call) => ({
+    id: call.id,
+    name: call.type === 'function' ? call.function.name : call.custom.name,
+    arguments:
+      call.type === 'function' ? call.function.arguments : call.custom.input,
+  }));
+}
+
+export function toolResultDetails(
+  trajectory: Trajectory,
+  trace: TrajectoryTrace,
+): ToolResultDetails | undefined {
+  if (!('output' in trace)) return undefined;
+  const output = trace.output;
+  if (!isToolOutput(output)) return undefined;
+  const definition = definitionFor(trajectory, trace.itemRef);
+  if (definition?.type !== 'tool') return undefined;
+  const call = trajectory.traces
+    .flatMap((candidate) => toolCallDetails(candidate))
+    .find((candidate) => candidate.id === output.tool_call_id);
+  return {
+    callId: output.tool_call_id,
+    name: definition.name,
+    arguments: call?.arguments ?? '',
+    content: contentText(output.content),
+    isError: output.isError ?? false,
+  };
+}
+
+function owningAgent(
+  trajectory: Trajectory,
+  trace: TrajectoryTrace,
+  traceIndex: number,
+): Ref | undefined {
+  const definition = definitionFor(trajectory, trace.itemRef);
+  if (definition?.type === 'llm') return definition.id;
+  if ('output' in trace && isToolOutput(trace.output)) {
+    const caller = callerOfToolCall(trajectory, trace.output.tool_call_id);
+    if (caller) return caller;
+  }
+  for (let index = traceIndex + 1; index < trajectory.traces.length; index++) {
+    const candidate = trajectory.traces[index];
+    if (candidate && isLlmMessage(trajectory, candidate)) return candidate.itemRef;
+  }
+  for (let index = traceIndex - 1; index >= 0; index--) {
+    const candidate = trajectory.traces[index];
+    if (candidate && isLlmMessage(trajectory, candidate)) return candidate.itemRef;
+  }
+  return rootAgent(trajectory)?.id;
+}
+
+function ancestorsOf(trajectory: Trajectory, agentId: Ref): Ref[] {
+  const ancestors: Ref[] = [];
+  let current: Ref | undefined = agentId;
+  while (current) {
+    const parent = parentAgentOf(trajectory, current);
+    if (!parent) break;
+    ancestors.push(parent);
+    current = parent;
+  }
+  return ancestors;
+}
+
+function parentAgentOf(trajectory: Trajectory, childRef: Ref): Ref | undefined {
+  for (const trace of trajectory.traces) {
+    if (
+      'output' in trace &&
+      isToolOutput(trace.output) &&
+      trace.output.childItemRef === childRef
+    )
+      return callerOfToolCall(trajectory, trace.output.tool_call_id);
+  }
+  return undefined;
+}
+
+function callerOfToolCall(trajectory: Trajectory, callId: string): Ref | undefined {
+  return trajectory.traces.find(
+    (trace) =>
+      'message' in trace &&
+      typeof trace.message === 'object' &&
+      trace.message !== null &&
+      trace.message.role === 'assistant' &&
+      trace.message.tool_calls?.some((call) => call.id === callId),
+  )?.itemRef;
+}
+
+function isLlmMessage(trajectory: Trajectory, trace: TrajectoryTrace): boolean {
+  return (
+    definitionFor(trajectory, trace.itemRef)?.type === 'llm' &&
+    'message' in trace
+  );
+}
+
+function isToolOutput(output: unknown): output is ToolTrace['output'] {
+  return (
+    typeof output === 'object' &&
+    output !== null &&
+    'tool_call_id' in output &&
+    typeof output.tool_call_id === 'string'
+  );
+}
+
+function chatToolName(tool: ChatCompletionTool): string {
+  return tool.type === 'function' ? tool.function.name : tool.custom.name;
+}
+
+function chatToolDescription(tool: ChatCompletionTool): string {
+  return tool.type === 'function' ? (tool.function.description ?? '') : '';
+}
+
+function contentText(content: unknown): string {
   if (typeof content === 'string') return content;
-  return content
-    .filter((block) => block.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text as string)
-    .join('\n')
-    .trim();
+  if (Array.isArray(content))
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (typeof part === 'object' && part !== null && 'text' in part)
+          return typeof part.text === 'string' ? part.text : '';
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  if (content === null || content === undefined) return '';
+  return JSON.stringify(content);
 }
