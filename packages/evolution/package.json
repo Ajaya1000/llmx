@@ -23,6 +23,7 @@
   "dependencies": {
     "@llmx/executor": "^0.1.0",
     "better-sqlite3": "^13.0.3",
+    "gray-matter": "^4.0.3",
     "openai": "^7.31.0"
   },
   "devDependencies": {

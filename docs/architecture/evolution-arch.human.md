@@ -66,6 +66,21 @@ flowchart LR
 
 Each LLM node is an coding agent. So they shuld be allowed to work with files and use bash, find, read i.e the normal coding tools.
 
+### ContextRegistry
+The structure of a context looks like this
+
+```json
+{
+    "id": "",
+    "type": "skill/agent/tool/code",
+    "name": "",
+    "description": "", 
+    "content": "", //string
+}
+```
+
+context stores takes an array of contexts and a path. And it creates a folder containing files for each contexts as an markdown.
+
 ### Trajectory
 Trajectory is one of the input for the eval and evolution loop. Our aim is to solve for multi-agent system. So a linear trajectory that we typically maintain for chat completion is not the right approach.
 
