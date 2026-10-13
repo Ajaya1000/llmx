@@ -16,16 +16,22 @@ const CONTEXT_TYPES: readonly ContextType[] = [
  * edited a moment ago is reflected immediately.
  */
 export class FileContextStore implements ContextStore {
-  private readonly path: string;
+  private readonly contexts: readonly Context[];
+  private path: string;
 
   constructor(contexts: readonly Context[], path: string) {
-    this.path = join(path, 'contexts');
-    mkdirSync(this.path, { recursive: true });
-    for (const context of contexts) this.materialize(context);
+    this.contexts = contexts;
+    this.path = this.render(path);
   }
 
   /** The store-owned `contexts/` folder holding one markdown file per context. */
   get directory(): string {
+    return this.path;
+  }
+
+  /** Re-materializes every context underneath `path`; returns the `contexts/` folder. */
+  async createWorkingDirectory(path: string): Promise<string> {
+    this.path = this.render(path);
     return this.path;
   }
 
@@ -40,14 +46,21 @@ export class FileContextStore implements ContextStore {
     return this.list().find((context) => context.id === id);
   }
 
-  private materialize(context: Context): void {
+  private render(path: string): string {
+    const directory = join(path, 'contexts');
+    mkdirSync(directory, { recursive: true });
+    for (const context of this.contexts) this.materialize(context, directory);
+    return directory;
+  }
+
+  private materialize(context: Context, directory: string): void {
     const text = matter.stringify(context.content, {
       id: context.id,
       type: context.type,
       name: context.name,
       description: context.description,
     });
-    writeFileSync(join(this.path, fileName(context.id)), text, 'utf8');
+    writeFileSync(join(directory, fileName(context.id)), text, 'utf8');
   }
 }
 

@@ -5,20 +5,20 @@ import type { DefinitionItem, Trace, Trajectory } from './index.js';
 /** Filesystem representation of a trajectory as a `trajectory/` folder. */
 export class TrajectoryStore {
   readonly trajectory: Trajectory;
-  readonly location: string;
+  private location?: string;
 
-  constructor(trajectory: Trajectory, location: string) {
+  constructor(trajectory: Trajectory) {
     this.trajectory = trajectory;
-    this.location = location;
   }
 
   /** Folder containing the serialized trajectory. */
   get directory(): string {
-    return join(this.location, 'trajectory');
+    return join(this.requireLocation(), 'trajectory');
   }
 
   /** Creates the working directory: `trajectory/flow.md`, `definition.json`, `traces.json`. */
-  async createWorkingDirectory(): Promise<string> {
+  async createWorkingDirectory(path: string): Promise<string> {
+    this.location = path;
     await mkdir(this.directory, { recursive: true });
     await Promise.all([
       writeFile(join(this.directory, 'flow.md'), this.trajectory.flow, 'utf8'),
@@ -49,6 +49,17 @@ export class TrajectoryStore {
       definition: JSON.parse(definition) as DefinitionItem[],
       traces: JSON.parse(traces) as Trace[],
     };
-    return new TrajectoryStore(trajectory, location);
+    const store = new TrajectoryStore(trajectory);
+    store.location = location;
+    return store;
+  }
+
+  private requireLocation(): string {
+    if (!this.location) {
+      throw new Error(
+        'TrajectoryStore needs a working directory: call createWorkingDirectory(path) first',
+      );
+    }
+    return this.location;
   }
 }

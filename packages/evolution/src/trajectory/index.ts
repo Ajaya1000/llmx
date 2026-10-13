@@ -82,4 +82,5 @@ export interface Trajectory {
 }
 
 export * from './distiller/index.js';
+export * from './distiller/prompt.js';
 export { TrajectoryStore } from './store.js';

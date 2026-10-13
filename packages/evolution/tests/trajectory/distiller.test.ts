@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -11,6 +11,7 @@ import {
   buildDistillerTask,
   distillerSystemPrompt,
 } from '../../src/trajectory/distiller/prompt.js';
+import type { Trajectory } from '../../src/trajectory/index.js';
 import { TrajectoryStore } from '../../src/trajectory/store.js';
 
 const tmpDirs: string[] = [];
@@ -26,6 +27,10 @@ async function workdir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'distiller-'));
   tmpDirs.push(dir);
   return dir;
+}
+
+function trajectory(): Trajectory {
+  return { flow: 'fix the bug', definition: [], traces: [] };
 }
 
 function fakeExecutor(reply: AgenticRunOutcome): {
@@ -49,15 +54,22 @@ function fakeExecutor(reply: AgenticRunOutcome): {
 }
 
 describe('TrajectoryDistiller', () => {
-  it('creates the output skeleton and hands the agent prompt, task, and cwd', async () => {
+  it('renders the trajectory, creates the output skeleton, and hands the agent prompt, task, and cwd', async () => {
     const path = await workdir();
-    await new TrajectoryStore(
-      { flow: 'fix the bug', definition: [], traces: [] },
-      path,
-    ).createWorkingDirectory();
     const { executor, seen } = fakeExecutor({ summary: 'distilled' });
+    const distiller = new TrajectoryDistiller({
+      store: new TrajectoryStore(trajectory()),
+      executor,
+    });
 
-    const result = await new TrajectoryDistiller({ path, executor }).distill();
+    await expect(distiller.createWorkingDirectory(path)).resolves.toBe(
+      join(path, 'trajectory'),
+    );
+    await expect(
+      readFile(join(path, 'trajectory', 'flow.md'), 'utf8'),
+    ).resolves.toBe('fix the bug');
+
+    const result = await distiller.distill();
 
     expect(result.summary).toBe('distilled');
     expect(result.outputDirectory).toBe(join(path, 'distilled-trajectory'));
@@ -77,31 +89,44 @@ describe('TrajectoryDistiller', () => {
     expect(seen().cwd).toBe(path);
   });
 
-  it('throws when the trajectory store is incomplete', async () => {
-    const path = await workdir();
-    await mkdir(join(path, 'trajectory'), { recursive: true });
-    await writeFile(join(path, 'trajectory', 'flow.md'), 'f', 'utf8');
-
+  it('throws when distill runs before a working directory exists', async () => {
     const { executor } = fakeExecutor({ summary: 'never runs' });
     await expect(
-      new TrajectoryDistiller({ path, executor }).distill(),
-    ).rejects.toThrow(/Missing trajectory store file/);
+      new TrajectoryDistiller({
+        store: new TrajectoryStore(trajectory()),
+        executor,
+      }).distill(),
+    ).rejects.toThrow(/^TrajectoryDistiller needs a working directory/);
   });
 
-  it('runs the executor-backed default path against a real store layout', async () => {
+  it('throws when a rendered store file is missing', async () => {
     const path = await workdir();
-    await new TrajectoryStore(
-      { flow: 'f', definition: [], traces: [] },
-      path,
-    ).createWorkingDirectory();
+    const { executor } = fakeExecutor({ summary: 'never runs' });
+    const distiller = new TrajectoryDistiller({
+      store: new TrajectoryStore(trajectory()),
+      executor,
+    });
 
-    // The default is the durable executor; its runtime path needs a live
-    // model, so assert the type and reuse the fake for the wiring itself.
-    const distiller = new TrajectoryDistiller({ path });
-    expect(distiller.storeDirectory).toBe(join(path, 'trajectory'));
+    await distiller.createWorkingDirectory(path);
+    await rm(join(path, 'trajectory', 'definition.json'));
+
+    await expect(distiller.distill()).rejects.toThrow(
+      /Missing trajectory store file/,
+    );
+  });
+
+  it('runs the executor-backed default path against a rendered store', async () => {
+    const path = await workdir();
     const { executor } = fakeExecutor({ summary: 'distilled' });
-    await expect(
-      new TrajectoryDistiller({ path, executor }).distill(),
-    ).resolves.toMatchObject({ summary: 'distilled' });
+    const distiller = new TrajectoryDistiller({
+      store: new TrajectoryStore(trajectory()),
+      executor,
+    });
+
+    await distiller.createWorkingDirectory(path);
+    await expect(distiller.distill()).resolves.toMatchObject({
+      summary: 'distilled',
+      outputDirectory: join(path, 'distilled-trajectory'),
+    });
   });
 });

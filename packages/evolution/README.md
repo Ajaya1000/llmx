@@ -15,9 +15,18 @@ drives itself (see [WIRING.md](./WIRING.md)).
 
 ## Layout
 
-- `src/` — types, ports, trajectory/wiki/context stores, distillers, proposer,
-  verifier, gate, eval, and the evolution loop.
+- `src/agent/` — the `AgenticExecutor` coding-agent seam.
+- `src/context/` — the context model and file-backed `ContextStore`.
+- `src/eval/` — the `EvalProposer` coding agent, its system prompt, and the
+  AutoEvals case vocabulary.
+- `src/trajectory/` — the trajectory model, its file store, and the
+  `TrajectoryDistiller`.
 - `tests/` — one colocated spec per module.
+
+## See also
+
+- [Evaluation types (AutoEvals)](../../docs/architecture/evaluation-types.md)
+- [EvalProposer plan](../../docs/architecture/eval-proposer-plan.md)
 
 ## Scripts
 

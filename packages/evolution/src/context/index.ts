@@ -14,14 +14,19 @@ export interface Context {
 }
 
 /**
- * Read-only, always-fresh view over the context artifacts. There is no write
- * method: mutation happens by editing the markdown files directly.
+ * Always-fresh, read-only view over the context artifacts. `createWorkingDirectory`
+ * renders a file copy for a coding agent to read; it never mutates the artifacts.
  */
 export interface ContextStore {
   /** Every context — the complete artifact set. */
   list(): Context[];
   /** One context by reference. */
   get(id: Ref): Context | undefined;
+  /**
+   * Materializes every context as a file under `<path>/contexts`, so a coding
+   * agent can read them; returns the created `contexts/` folder.
+   */
+  createWorkingDirectory(path: string): Promise<string>;
 }
 
 export { FileContextStore } from './store.js';

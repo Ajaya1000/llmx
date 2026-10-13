@@ -5,6 +5,7 @@ import {
   type AgenticRunOutcome,
   MissionAgenticExecutor,
 } from '../../agent/index.js';
+import type { TrajectoryStore } from '../store.js';
 import { buildDistillerTask, distillerSystemPrompt } from './prompt.js';
 
 export interface DistillResult extends AgenticRunOutcome {
@@ -13,36 +14,44 @@ export interface DistillResult extends AgenticRunOutcome {
 }
 
 export interface TrajectoryDistillerOptions {
-  /** Location holding the `trajectory/` store; `distilled-trajectory/` is created beside it. */
-  path: string;
+  /** The trajectory store this distiller renders and distills. */
+  store: TrajectoryStore;
   /** Agentic executor; defaults to the mission-backed one. */
   executor?: AgenticExecutor;
 }
 
 const STORE_FILES = ['flow.md', 'definition.json', 'traces.json'] as const;
 
-/** The coding agent that distills a trajectory store into `distilled-trajectory/`. */
+/** The coding agent that renders a trajectory store and distills it into `distilled-trajectory/`. */
 export class TrajectoryDistiller {
-  private readonly path: string;
+  private readonly store: TrajectoryStore;
   private readonly executor: AgenticExecutor;
+  private path?: string;
 
   constructor(options: TrajectoryDistillerOptions) {
-    this.path = options.path;
+    this.store = options.store;
     this.executor = options.executor ?? this.defaultExecutor();
   }
 
   /** The trajectory store this distiller reads. */
   get storeDirectory(): string {
-    return join(this.path, 'trajectory');
+    return this.store.directory;
   }
 
   /** The directory this distiller creates and the agent fills. */
   get outputDirectory(): string {
-    return join(this.path, 'distilled-trajectory');
+    return join(this.requirePath(), 'distilled-trajectory');
+  }
+
+  /** Writes the store's trajectory as `<path>/trajectory/` and returns that store folder. */
+  async createWorkingDirectory(path: string): Promise<string> {
+    this.path = path;
+    return this.store.createWorkingDirectory(path);
   }
 
   /** Creates the output skeleton, then runs the distiller agent over the store. */
   async distill(): Promise<DistillResult> {
+    const directory = this.requirePath();
     await this.assertStore();
     await mkdir(join(this.outputDirectory, 'failures_and_patterns'), {
       recursive: true,
@@ -53,7 +62,7 @@ export class TrajectoryDistiller {
         storeDirectory: this.storeDirectory,
         outputDirectory: this.outputDirectory,
       }),
-      cwd: this.path,
+      cwd: directory,
     });
     return { ...outcome, outputDirectory: this.outputDirectory };
   }
@@ -81,5 +90,14 @@ export class TrajectoryDistiller {
         throw new Error(`Missing trajectory store file: ${filePath}`);
       }
     }
+  }
+
+  private requirePath(): string {
+    if (!this.path) {
+      throw new Error(
+        'TrajectoryDistiller needs a working directory: call createWorkingDirectory(path) first',
+      );
+    }
+    return this.path;
   }
 }

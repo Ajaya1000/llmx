@@ -117,4 +117,26 @@ describe('FileContextStore', () => {
     expect(store.get('agent:researcher')?.id).toBe('agent:researcher');
     expect(store.get('a/b c')?.id).toBe('a/b c');
   });
+
+  it('re-renders into a new working directory and reads from it', async () => {
+    const first = directory();
+    const second = directory();
+    const store = new FileContextStore([context()], first);
+
+    await expect(store.createWorkingDirectory(second)).resolves.toBe(
+      join(second, 'contexts'),
+    );
+    expect(store.directory).toBe(join(second, 'contexts'));
+    expect(readdirSync(store.directory)).toHaveLength(1);
+
+    const [file] = readdirSync(store.directory);
+    const target = join(store.directory, file);
+    writeFileSync(
+      target,
+      readFileSync(target, 'utf8').replace('# Search', '# Search rendered'),
+      'utf8',
+    );
+
+    expect(store.get('tool:search')?.content).toContain('# Search rendered');
+  });
 });
